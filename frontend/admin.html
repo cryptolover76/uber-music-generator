@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerenciar Conteúdo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #121212; color: #fff; padding: 20px; min-height: 100vh; }
+    h1 { color: #FF9800; text-align: center; margin-bottom: 24px; font-size: 1.8rem; }
+    .card { background: #1E1E1E; padding: 24px; border-radius: 12px; margin-bottom: 20px; max-width: 640px; margin-left: auto; margin-right: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    label { display: block; margin-bottom: 8px; font-weight: bold; color: #FF9800; font-size: 0.9rem; }
+    input, textarea, select { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #333; background: #2A2A2A; color: #fff; font-size: 15px; }
+    textarea { min-height: 160px; font-family: monospace; resize: vertical; }
+    button { padding: 14px 20px; border-radius: 8px; border: none; background: #FF9800; color: #000; font-size: 16px; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+    button:hover { opacity: 0.85; }
+    button:active { transform: scale(0.98); }
+    button.secondary { background: #333; color: #fff; }
+    button.danger { background: #d32f2f; color: #fff; }
+    .btn-row { display: flex; gap: 10px; }
+    .btn-row button { flex: 1; }
+    #msg { text-align: center; margin-top: 15px; font-weight: bold; min-height: 20px; }
+    .footer-nav { text-align: center; margin-top: 30px; padding: 16px 0; border-top: 1px solid #1E1E1E; }
+    .footer-nav a { color: #444; text-decoration: none; font-size: 12px; transition: color 0.2s; }
+    .footer-nav a:hover { color: #666; }
+    .hint { font-size: 12px; color: #888; margin-top: -10px; margin-bottom: 15px; }
+    .item-list { margin-top: 20px; }
+    .item-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: #2A2A2A; border-radius: 8px; margin-bottom: 10px; }
+    .item-row .info { flex: 1; min-width: 0; }
+    .item-row .name { font-weight: bold; color: #fff; margin-bottom: 4px; }
+    .item-row .preview { font-size: 13px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-row .actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .item-row .actions button { padding: 8px 14px; font-size: 13px; }
+    .empty { text-align: center; color: #666; padding: 30px; font-style: italic; }
+    .form-title { color: #FF9800; font-size: 1.1rem; margin-bottom: 16px; font-weight: bold; }
+    #editId { display: none; }
+    .tab-row { display: flex; gap: 8px; max-width: 640px; margin: 0 auto 20px; flex-wrap: wrap; }
+    .tab { padding: 10px 18px; border-radius: 8px; background: #1E1E1E; color: #aaa; cursor: pointer; font-size: 14px; border: 1px solid #333; transition: all 0.2s; }
+    .tab.active { background: #FF9800; color: #000; border-color: #FF9800; font-weight: bold; }
+    .tab:hover:not(.active) { color: #fff; border-color: #FF9800; }
+  </style>
+</head>
+<body>
+  <h1>🎵 Gerenciar Conteúdo</h1>
+
+  <div class="tab-row" id="tabs">
+    <div class="tab active" data-tipo="templates_letras" data-label="Letra da Música (Principal)" data-estilo="false">📝 Letra</div>
+    <div class="tab" data-tipo="climas" data-label="Texto do Clima (Intro/Contexto)" data-estilo="false">🌤️ Clima</div>
+    <div class="tab" data-tipo="periodos" data-label="Texto do Período (Intro/Contexto)" data-estilo="false">🕒 Período</div>
+    <div class="tab" data-tipo="dias_semana" data-label="Texto do Dia (Intro/Contexto)" data-estilo="false">📅 Dia</div>
+    <div class="tab" data-tipo="estilos" data-label="Estilo Musical (Descrição para IA)" data-estilo="true">🎸 Estilo</div>
+  </div>
+
+  <div class="card">
+    <div class="form-title" id="formTitle">Adicionar Novo</div>
+    <input type="hidden" id="editId">
+
+    <label>Nome da Opção (ex: "Chuvoso Aconchegante")</label>
+    <input type="text" id="nome" placeholder="Ex: Intro Chuva, Verso Sexta-feira">
+
+    <label id="labelTexto">Texto / Letra</label>
+    <textarea id="conteudo" placeholder="Escreva aqui... Use {NOME} onde quiser que o nome do passageiro apareça."></textarea>
+    <div class="hint">💡 Placeholders: <b>{NOME}</b>, <b>{ARTIGO}</b> (o/a), <b>{PREP}</b> (do/da), <b>{NO_NA}</b> (no/na), <b>{PASSAGEIRO}</b> (passageiro/a), <b>{O_A}</b> (o/a). Marcadores em inglês: [Intro - Spoken: slow-paced, soft delivery], [Spoken: calm, slow spoken word], [Verse], [Chorus], [Bridge], [Pre-Chorus], [Outro].</div>
+
+    <div class="btn-row">
+      <button onclick="salvar()">💾 Salvar</button>
+      <button class="secondary" onclick="cancelarEdicao()" id="btnCancelar" style="display:none;">✖ Cancelar</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <div class="form-title">Itens Cadastrados</div>
+    <div class="item-list" id="lista"></div>
+  </div>
+
+  <div class="footer-nav">
+    <a href="/">voltar para o gerador</a>
+  </div>
+
+  <script>
+    let tipoAtual = 'templates_letras';
+    let isEstilo = false;
+
+    const tabs = document.querySelectorAll('.tab');
+    tabs.forEach(tab => tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      tipoAtual = tab.dataset.tipo;
+      isEstilo = tab.dataset.estilo === 'true';
+      atualizarFormulario();
+      cancelarEdicao();
+      carregarLista();
+    }));
+
+    function atualizarFormulario() {
+      const labelTexto = document.getElementById('labelTexto');
+      const conteudo = document.getElementById('conteudo');
+      if (isEstilo) {
+        labelTexto.innerText = 'Prompt Musical (Descrição em inglês para a IA)';
+        conteudo.placeholder = 'Ex: brazilian sertanejo, acoustic guitar, emotional vocals';
+      } else {
+        labelTexto.innerText = 'Texto / Letra (Roteiro)';
+        conteudo.placeholder = '[Intro - Spoken: slow-paced, soft delivery] Ei {NOME}, o dia tá lindo...\n\n[Verse]\nAproveita a viagem, {NOME}...';
+      }
+    }
+
+    async function carregarLista() {
+      const lista = document.getElementById('lista');
+      lista.innerHTML = '<div class="empty">Carregando...</div>';
+      try {
+        const res = await fetch(`/api/admin/list/${tipoAtual}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erro');
+        if (!data || data.length === 0) {
+          lista.innerHTML = '<div class="empty">Nenhum item cadastrado. Adicione acima!</div>';
+          return;
+        }
+        lista.innerHTML = data.map(item => {
+          const coluna = isEstilo ? 'prompt' : (item.letra ? 'letra' : 'texto');
+          const preview = (item[coluna] || '').substring(0, 80);
+          return `<div class="item-row">
+            <div class="info">
+              <div class="name">${escapeHtml(item.name)}</div>
+              <div class="preview">${escapeHtml(preview)}${preview.length >= 80 ? '...' : ''}</div>
+            </div>
+            <div class="actions">
+              <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}')">✏️ Editar</button>
+              <button class="danger" onclick="excluirItem('${item.id}','${escapeAttr(item.name)}')">🗑️ Excluir</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        lista.innerHTML = `<div class="empty">Erro ao carregar: ${e.message}</div>`;
+      }
+    }
+
+    function editarItem(id, nome, conteudo) {
+      document.getElementById('editId').value = id;
+      document.getElementById('nome').value = unescapeAttr(nome);
+      document.getElementById('conteudo').value = unescapeAttr(conteudo);
+      document.getElementById('formTitle').innerText = '✏️ Editando Item';
+      document.getElementById('btnCancelar').style.display = 'block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function cancelarEdicao() {
+      document.getElementById('editId').value = '';
+      document.getElementById('nome').value = '';
+      document.getElementById('conteudo').value = '';
+      document.getElementById('formTitle').innerText = 'Adicionar Novo';
+      document.getElementById('btnCancelar').style.display = 'none';
+    }
+
+    async function salvar() {
+      const id = document.getElementById('editId').value;
+      const nome = document.getElementById('nome').value.trim();
+      const conteudo = document.getElementById('conteudo').value.trim();
+      const msg = document.getElementById('msg');
+
+      if (!nome || !conteudo) {
+        msg.style.color = 'red';
+        msg.innerText = 'Preencha o nome e o texto!';
+        return;
+      }
+
+      msg.style.color = '#aaa';
+      msg.innerText = 'Salvando...';
+
+      try {
+        const url = id ? `/api/admin/update/${tipoAtual}/${id}` : '/api/admin/add';
+        const method = id ? 'PUT' : 'POST';
+        const body = id ? { nome, conteudo } : { tipo: tipoAtual, nome, conteudo };
+
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          msg.style.color = '#4CAF50';
+          msg.innerText = '✅ Salvo com sucesso!';
+          cancelarEdicao();
+          carregarLista();
+          setTimeout(() => { msg.innerText = ''; }, 2500);
+        } else {
+          msg.style.color = 'red';
+          msg.innerText = '❌ Erro: ' + (data.error || 'desconhecido');
+        }
+      } catch (e) {
+        msg.style.color = 'red';
+        msg.innerText = '❌ Erro de conexão.';
+      }
+    }
+
+    async function excluirItem(id, nome) {
+      if (!confirm(`Excluir "${unescapeAttr(nome)}"? O item será desativado.`)) return;
+      try {
+        const res = await fetch(`/api/admin/delete/${tipoAtual}/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          carregarLista();
+        } else {
+          alert('Erro: ' + (data.error || 'desconhecido'));
+        }
+      } catch (e) {
+        alert('Erro de conexão.');
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    }
+    function escapeAttr(str) {
+      return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+    }
+    function unescapeAttr(str) {
+      return (str || '').replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+    }
+
+    atualizarFormulario();
+    carregarLista();
+  </script>
+</body>
+</html>

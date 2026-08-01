@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Gerador de Música Personalizada</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #121212; color: #fff; padding: 15px; margin: 0; }
+    h1 { text-align: center; color: #1DB954; font-size: 1.4rem; margin-bottom: 20px; }
+    .card { background: #1E1E1E; padding: 15px; border-radius: 12px; margin-bottom: 12px; }
+    label { display: block; margin-bottom: 8px; font-weight: bold; color: #1DB954; font-size: 0.9rem; }
+    select, input { width: 100%; padding: 14px; border-radius: 8px; border: 1px solid #333; background: #2A2A2A; color: #fff; font-size: 16px; box-sizing: border-box; appearance: none; }
+    button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: #1DB954; color: #000; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+    button:disabled { background: #555; color: #888; }
+    .preview-box { background: #000; border: 1px solid #333; border-radius: 8px; padding: 15px; margin-top: 15px; font-size: 13px; white-space: pre-wrap; color: #0f0; font-family: monospace; max-height: 400px; overflow-y: auto; display: none; }
+    .preview-title { color: #FF9800; font-weight: bold; margin-bottom: 5px; font-family: -apple-system, sans-serif; }
+    .footer-nav { text-align: center; margin-top: 30px; padding: 16px 0; border-top: 1px solid #1E1E1E; }
+    .footer-nav a { color: #444; text-decoration: none; font-size: 12px; transition: color 0.2s; }
+    .footer-nav a:hover { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>🎵 Gerador de Música Personalizada</h1>
+  
+  <div class="card">
+    <label>👤 Nome do Passageiro</label>
+    <input type="text" id="nome" placeholder="Ex: João, Maria" oninput="montarQuebraCabeca()">
+  </div>
+
+  <div class="card">
+    <label>⚧ Gênero (para artigos "o/a", "do/da")</label>
+    <select id="genero" onchange="montarQuebraCabeca()">
+      <option value="M">Masculino (o, do, no)</option>
+      <option value="F">Feminino (a, da, na)</option>
+      <option value="N">Neutro (apenas o nome)</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <label>🌤️ Texto do Clima (Opcional)</label>
+    <select id="clima" onchange="montarQuebraCabeca()"><option value="">Nenhum</option></select>
+  </div>
+
+  <div class="card">
+    <label>🕒 Texto do Período (Opcional)</label>
+    <select id="periodo" onchange="montarQuebraCabeca()"><option value="">Nenhum</option></select>
+  </div>
+
+  <div class="card">
+    <label>📅 Texto do Dia (Opcional)</label>
+    <select id="dia" onchange="montarQuebraCabeca()"><option value="">Nenhum</option></select>
+  </div>
+
+  <div class="card">
+    <label>📝 Letra Principal da Música</label>
+    <select id="template" onchange="montarQuebraCabeca()"></select>
+  </div>
+
+  <div class="card">
+    <label>🎸 Estilo Musical (Para a IA)</label>
+    <select id="estilo" onchange="montarQuebraCabeca()"></select>
+  </div>
+
+  <div class="card">
+    <div class="preview-title">👁️ ROTEIRO FINAL (Como o Suno vai receber)</div>
+    <div id="previewBox" class="preview-box">Preencha os campos para montar o roteiro...</div>
+  </div>
+
+  <button id="btnGerar" onclick="gerarMusica()">🎧 ENVIAR PARA O SUNO AGORA</button>
+  <div id="status" style="text-align: center; margin-top: 15px; color: #aaa;"></div>
+
+  <div class="footer-nav">
+    <a href="/admin.html">gerenciar conteúdo</a>
+  </div>
+
+  <script>
+    let dados = { climas: [], periodos: [], dias: [], templates: [], estilos: [] };
+    let categoriasMap = {};
+
+    async function carregarCategorias(tipo) {
+      try {
+        const res = await fetch(`/api/categorias/${tipo}`);
+        categoriasMap[tipo] = await res.json();
+      } catch {
+        categoriasMap[tipo] = [];
+      }
+    }
+
+    async function carregar(endpoint, chave, idSelect) {
+      await carregarCategorias(endpoint);
+      const res = await fetch(`/api/${endpoint}`);
+      dados[chave] = await res.json();
+      const select = document.getElementById(idSelect);
+      const cats = categoriasMap[endpoint] || [];
+      if (cats.length > 0) {
+        const grupos = {};
+        dados[chave].forEach(item => {
+          const c = item.categoria || 'Sem categoria';
+          if (!grupos[c]) grupos[c] = [];
+          grupos[c].push(item);
+        });
+        const ordem = cats.filter(c => grupos[c]);
+        const extras = Object.keys(grupos).filter(c => !cats.includes(c));
+        const todas = [...ordem, ...extras];
+        select.innerHTML = '<option value="">Nenhum</option>' + todas.map(cat =>
+          `<optgroup label="${cat}">${grupos[cat].map(item =>
+            `<option value="${item.id}">${item.name}</option>`).join('')}</optgroup>`
+        ).join('');
+      } else {
+        select.innerHTML = '<option value="">Nenhum</option>';
+        dados[chave].forEach(item => {
+          select.innerHTML += `<option value="${item.id}">${item.name}</option>`;
+        });
+      }
+    }
+
+    // Funções inteligentes (carregadas do módulo centralizado)
+    let substituirIntel, montarLetra;
+    import('/shared/substituir.js').then(mod => {
+      substituirIntel = mod.substituirIntel;
+      montarLetra = mod.montarLetra;
+    }).catch(e => console.error('Falha ao carregar substituir.js', e));
+
+    function montarQuebraCabeca() {
+      const nome = document.getElementById('nome').value.trim() || '{NOME}';
+      const genero = document.getElementById('genero').value;
+
+      const clima = dados.climas.find(c => c.id == document.getElementById('clima').value);
+      const periodo = dados.periodos.find(p => p.id == document.getElementById('periodo').value);
+      const dia = dados.dias.find(d => d.id == document.getElementById('dia').value);
+      const template = dados.templates.find(t => t.id == document.getElementById('template').value);
+      const estilo = dados.estilos.find(e => e.id == document.getElementById('estilo').value);
+
+      if (!template || !estilo || !montarLetra) {
+        document.getElementById('previewBox').style.display = 'none';
+        return;
+      }
+
+      const partes = [periodo, clima, dia].filter(Boolean);
+      const letraMontada = montarLetra(partes, template, nome, genero);
+
+      const box = document.getElementById('previewBox');
+      box.innerHTML = `<div style="color:#FF9800;font-weight:bold;margin-bottom:8px;">Tags: ${estilo.prompt}</div><div style="white-space:pre-wrap">${letraMontada}</div>`;
+      box.style.display = 'block';
+    }
+
+    window.onload = () => {
+      carregar('climas', 'climas', 'clima');
+      carregar('periodos', 'periodos', 'periodo');
+      carregar('dias_semana', 'dias', 'dia');
+      carregar('templates_letras', 'templates', 'template');
+      carregar('estilos', 'estilos', 'estilo');
+    };
+
+    let pollTimer = null;
+
+    async function gerarMusica() {
+      const nome = document.getElementById('nome').value.trim();
+      if (!nome) return alert('Digite o nome do passageiro!');
+
+      const btn = document.getElementById('btnGerar');
+      const status = document.getElementById('status');
+      btn.disabled = true;
+      btn.innerText = '⏳ Enviando...';
+
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+      try {
+        const res = await fetch('/api/music/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            passageiroNome: nome,
+            genero: document.getElementById('genero').value,
+            templateId: document.getElementById('template').value,
+            estiloId: document.getElementById('estilo').value,
+            climaId: document.getElementById('clima').value || null,
+            periodoId: document.getElementById('periodo').value || null,
+            diaId: document.getElementById('dia').value || null
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.taskId) {
+          status.innerHTML = `✅ <b>Enviado!</b> Task: ${data.taskId}<br><small id="pollMsg">Aguardando o Suno gerar... (verificando a cada 10s)</small>`;
+          pollStatus(data.taskId);
+          pollTimer = setInterval(() => pollStatus(data.taskId), 10000);
+        } else if (data.success) {
+          let html = `✅ <b>Letra montada!</b><br><small>${data.status === 'no_cookie' ? 'Cookie do Suno não configurado no .env' : 'Tarefa enviada, mas sem task ID.'}</small>`;
+          if (data.debug) {
+            html += `<br><details style="margin-top:8px"><summary style="cursor:pointer;color:#1DB954">Ver resposta da API (debug)</summary><pre style="background:#1a1a1a;padding:8px;border-radius:4px;overflow-x:auto;font-size:11px;color:#0f0">${JSON.stringify(data.debug, null, 2)}</pre></details>`;
+          }
+          status.innerHTML = html;
+        } else {
+          status.innerText = `❌ Erro: ${data.error}`;
+        }
+      } catch (e) {
+        status.innerText = '❌ Erro de conexão.';
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '🎧 ENVIAR PARA O SUNO AGORA';
+      }
+    }
+
+    async function pollStatus(taskId) {
+      const pollMsg = document.getElementById('pollMsg');
+      try {
+        const res = await fetch(`/api/music/status/${taskId}`);
+        const data = await res.json();
+
+        if (data.success && data.status === 'completed' && data.clips && data.clips.length > 0) {
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          let html = `✅ <b>Música pronta!</b><br>`;
+          data.clips.forEach((clip, i) => {
+            html += `<div style="margin-top:8px"><b>Versão ${i + 1}</b>`;
+            if (clip.audioUrl) html += `<br><audio controls src="${clip.audioUrl}" style="width:100%;margin-top:4px"></audio>`;
+            if (clip.videoUrl) html += `<br><a href="${clip.videoUrl}" target="_blank" style="color:#1DB954">🎬 Ver vídeo</a>`;
+            html += `</div>`;
+          });
+          document.getElementById('status').innerHTML = html;
+        } else if (data.status === 'completed') {
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          document.getElementById('status').innerHTML = `✅ <b>Concluído</b>, mas sem áudio retornado.<br><small>Verifique o task ${taskId} no painel do Suno.</small>`;
+        } else if (pollMsg) {
+          pollMsg.innerText = `Status: ${data.status}... (verificando a cada 10s)`;
+        }
+      } catch (e) {
+        if (pollMsg) pollMsg.innerText = 'Erro ao verificar status, tentando novamente...';
+      }
+    }
+  </script>
+</body>
+</html>
