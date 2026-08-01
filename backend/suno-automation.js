@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -10,6 +11,29 @@ const SUNO_HOME_URL = 'https://suno.com';
 
 const MAX_WAIT_MINUTES = 5;
 const POLL_INTERVAL_MS = 5000;
+
+const CHROMIUM_CANDIDATES = [
+  process.env.CHROMIUM_PATH,
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/local/bin/chromium',
+  '/snap/bin/chromium',
+].filter(Boolean);
+
+function findChromium() {
+  for (const candidate of CHROMIUM_CANDIDATES) {
+    try {
+      if (fs.existsSync(candidate)) {
+        log(`Using Chromium at: ${candidate}`);
+        return candidate;
+      }
+    } catch {}
+  }
+  log('No system Chromium found, falling back to Playwright bundled browser');
+  return undefined;
+}
 
 let activeBrowser = null;
 let activePage = null;
@@ -37,7 +61,7 @@ export async function launchBrowser({ headless = true } = {}) {
   log(`Launching browser (headless=${headless})...`);
   const browser = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless,
-    executablePath: process.env.CHROMIUM_PATH || undefined,
+    executablePath: findChromium(),
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
