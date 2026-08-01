@@ -1,12 +1,21 @@
 import express from 'express';
 import { supabase, getById } from '../../config/database.js';
 import { montarLetra } from '../../shared/substituir.js';
-import { hasSunoConfigured, getGenerateEndpoint, gerarMusica, verificarStatus } from '../../config/suno.js';
+import { generateSong } from '../suno-automation.js';
+import { sendTelegramMessage, formatMusicMessage } from '../telegram.js';
+import dotenv from 'dotenv';
 
+dotenv.config();
 const router = express.Router();
+
+const jobs = new Map();
 
 router.post('/generate', async (req, res) => {
   const { passageiroNome, genero, templateId, estiloId, climaId, periodoId, diaId } = req.body;
+
+  if (!passageiroNome || !templateId || !estiloId) {
+    return res.status(400).json({ error: 'Nome, template e estilo são obrigatórios' });
+  }
 
   try {
     const [template, estilo, clima, periodo, dia] = await Promise.all([
@@ -24,92 +33,103 @@ router.post('/generate', async (req, res) => {
     const partes = [periodo, clima, dia].filter(Boolean);
     const letraFinal = montarLetra(partes, template, passageiroNome, genero);
     const tags = estilo.prompt;
-
-    let sunoTaskId = null;
-    let sunoStatus = 'not_sent';
-    let sunoRawResponse = null;
-
-    if (hasSunoConfigured()) {
-      try {
-        sunoRawResponse = await gerarMusica({ letraFinal, tags, passageiroNome });
-        console.log(`✅ Resposta:`, JSON.stringify(sunoRawResponse, null, 2));
-
-        const clips = Array.isArray(sunoRawResponse) ? sunoRawResponse : [];
-        sunoTaskId = clips.map(c => c.id).filter(Boolean).join(',');
-        sunoStatus = sunoTaskId ? 'pending' : 'failed_no_task_id';
-      } catch (err) {
-        const msg = err.response?.data?.error || err.response?.data?.message || err.response?.status || err.message;
-        console.warn(`❌ Erro Suno: ${msg}`);
-        sunoRawResponse = err.response?.data || { error: msg };
-        sunoStatus = 'error';
-      }
-    } else {
-      sunoStatus = 'no_cookie';
-    }
-
     const promptFinal = `Tags: ${tags}\n\n---\n\n${letraFinal}`;
+    const title = `Para ${passageiroNome}`;
 
-    const { error: insertError } = await supabase
-      .from('historico')
-      .insert({
-        passageiro_nome: passageiroNome,
-        prompt_final: promptFinal,
-        suno_music_id: sunoTaskId || 'no_task',
-      });
-    if (insertError) console.warn('⚠️ Falha ao salvar histórico:', insertError.message);
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    res.json({
-      success: true,
-      taskId: sunoTaskId,
-      status: sunoStatus,
-      letraMontada: letraFinal,
-      tags: tags,
-      promptUsado: promptFinal,
-      debug: { response: sunoRawResponse, endpoint: getGenerateEndpoint() },
+    jobs.set(jobId, {
+      status: 'starting',
+      progress: 'Iniciando...',
+      shareLink: null,
+      error: null,
+      passageiroNome,
+      estilo: estilo.name,
+      letraFinal,
+      promptFinal,
+      tags,
+      startedAt: Date.now(),
     });
+
+    res.json({ success: true, jobId, letraMontada: letraFinal, tags, promptUsado: promptFinal });
+
+    runGeneration(jobId, { lyrics: letraFinal, tags, title, passageiroNome, estiloName: estilo.name, promptFinal });
   } catch (error) {
-    console.error('❌ Erro:', error.message);
+    console.error('[Music] Error:', error.message);
     res.status(500).json({ error: 'Erro interno' });
   }
 });
 
-router.get('/status/:taskId', async (req, res) => {
-  const { taskId } = req.params;
-
-  if (!hasSunoConfigured()) {
-    return res.status(400).json({ error: 'Cookie do Suno não configurado' });
-  }
+async function runGeneration(jobId, { lyrics, tags, title, passageiroNome, estiloName, promptFinal }) {
+  const job = jobs.get(jobId);
+  if (!job) return;
 
   try {
-    const rawData = await verificarStatus(taskId);
-    console.log('🔍 Resposta status:', JSON.stringify(rawData, null, 2));
+    job.status = 'running';
+    job.progress = 'Abrindo navegador...';
 
-    const clips = Array.isArray(rawData) ? rawData : [];
-
-    const allComplete = clips.length > 0 && clips.every(c => c.status === 'complete');
-    const anyError = clips.some(c => c.status === 'error');
-    const overallStatus = anyError ? 'error' : allComplete ? 'completed' : 'pending';
-
-    res.json({
-      success: true,
-      taskId,
-      status: overallStatus,
-      clips: clips.map(clip => ({
-        id: clip?.id,
-        audioUrl: clip?.audio_url,
-        videoUrl: clip?.video_url,
-        title: clip?.title,
-        duration: clip?.duration,
-        status: clip?.status,
-      })),
+    const result = await generateSong({
+      lyrics,
+      tags,
+      title,
+      headless: true,
+      onProgress: (msg) => {
+        job.progress = msg;
+        console.log(`[Job ${jobId}] ${msg}`);
+      },
     });
+
+    if (result.success && result.shareLink) {
+      job.status = 'completed';
+      job.shareLink = result.shareLink;
+      job.progress = 'Música pronta!';
+
+      const { error: insertError } = await supabase
+        .from('historico')
+        .insert({
+          passageiro_nome: passageiroNome,
+          prompt_final: promptFinal,
+          suno_music_id: 'browser_auto',
+          suno_share_link: result.shareLink,
+          tags,
+        });
+      if (insertError) console.warn('[Music] Falha ao salvar histórico:', insertError.message);
+
+      const tgResult = await sendTelegramMessage(
+        formatMusicMessage({ passageiroNome, shareLink: result.shareLink, estilo: estiloName })
+      );
+      job.telegramSent = tgResult.success;
+      job.progress = tgResult.success ? 'Link enviado no Telegram!' : 'Música pronta, mas falha ao enviar Telegram';
+    } else {
+      job.status = 'failed';
+      job.error = result.error || 'Falha desconhecida na geração';
+      job.progress = `Erro: ${job.error}`;
+    }
   } catch (err) {
-    console.warn(`❌ Status falhou:`, err.response?.data || err.message);
-    res.status(500).json({
-      error: 'Não foi possível verificar o status',
-      details: err.response?.data || err.message,
-    });
+    job.status = 'failed';
+    job.error = err.message;
+    job.progress = `Erro: ${err.message}`;
+    console.error(`[Job ${jobId}] Error:`, err.message);
   }
+}
+
+router.get('/status/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    return res.status(404).json({ error: 'Job não encontrado' });
+  }
+
+  res.json({
+    success: true,
+    jobId,
+    status: job.status,
+    progress: job.progress,
+    shareLink: job.shareLink,
+    error: job.error,
+    telegramSent: job.telegramSent,
+  });
 });
 
 export default router;

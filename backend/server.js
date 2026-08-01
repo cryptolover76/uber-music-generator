@@ -97,7 +97,7 @@ app.get('/api/musicas', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('historico')
-      .select('id, passageiro_nome, descricao, audio_url, video_url, status, suno_music_id, created_at')
+      .select('id, passageiro_nome, suno_share_link, tags, suno_music_id, created_at')
       .order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data || []);
