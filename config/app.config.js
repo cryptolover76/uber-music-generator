@@ -8,4 +8,15 @@ export const config = {
   },
 
   chromiumPath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+
+  musicPreparation: {
+    timezone: 'America/Sao_Paulo',
+    requestTtlHours: 12,
+    periods: {
+      morning: '05:00',
+      afternoon: '12:00',
+      lateAfternoon: '17:00',
+      night: '19:00',
+    },
+  },
 };

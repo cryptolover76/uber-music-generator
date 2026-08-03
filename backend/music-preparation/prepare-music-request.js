@@ -44,15 +44,24 @@ function toDto(request) {
   });
 }
 
+function validateCatalogRepository(repository) {
+  if (
+    !repository ||
+    typeof repository !== 'object' ||
+    Array.isArray(repository) ||
+    typeof repository.list !== 'function' ||
+    typeof repository.findById !== 'function'
+  ) {
+    throw new TypeError('catalogRepository must implement list(type) and findById(type, id)');
+  }
+}
+
 async function listCatalog(repository, type) {
-  if (typeof repository.list === 'function') return repository.list(CATALOG_TYPES[type]);
-  if (typeof repository.listActive === 'function') return repository.listActive(CATALOG_TYPES[type]);
-  throw new TypeError('catalogRepository.list(type) is required');
+  return repository.list(CATALOG_TYPES[type]);
 }
 
 async function findCatalog(repository, type, id) {
-  if (typeof repository.findById === 'function') return repository.findById(CATALOG_TYPES[type], id);
-  throw new TypeError('catalogRepository.findById(type, id) is required');
+  return repository.findById(CATALOG_TYPES[type], id);
 }
 
 function ensureManualItem(item, type, id) {
@@ -87,7 +96,8 @@ export function createMusicPreparationService({
   catalogSelector = defaultCatalogSelector,
   settings = {},
 }) {
-  if (!catalogRepository || !musicRequestRepository) throw new TypeError('Both repositories are required');
+  validateCatalogRepository(catalogRepository);
+  if (!musicRequestRepository) throw new TypeError('musicRequestRepository is required');
   const timezone = settings.timezone ?? DEFAULT_TIMEZONE;
   const validityHours = settings.validityHours ?? 12;
   if (!(Number.isFinite(validityHours) && validityHours > 0)) throw new TypeError('settings.validityHours must be positive');

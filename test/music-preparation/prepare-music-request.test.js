@@ -224,3 +224,54 @@ test('template segue exatamente a precedência letra || texto do montarLetra', a
     assert.doesNotMatch(dto.lyrics, /Texto alternativo/);
   });
 });
+test('contrato completo do catalogRepository é validado na criação do serviço', () => {
+  const validCatalogRepository = {
+    async list() { return []; },
+    async findById() { return null; },
+  };
+  const musicRequestRepository = createFakeMusicRequestRepository();
+
+  assert.doesNotThrow(() => createMusicPreparationService({
+    catalogRepository: validCatalogRepository,
+    musicRequestRepository,
+  }));
+
+  const invalidRepositories = [
+    ['somente list', { async list() { return []; } }],
+    ['somente findById', { async findById() { return null; } }],
+    ['somente listActive', { async listActive() { return []; } }],
+    ['list não função', { list: [], async findById() { return null; } }],
+    ['findById não função', { async list() { return []; }, findById: true }],
+  ];
+
+  for (const [name, catalogRepository] of invalidRepositories) {
+    assert.throws(
+      () => createMusicPreparationService({ catalogRepository, musicRequestRepository }),
+      (error) => error instanceof TypeError &&
+        error.message === 'catalogRepository must implement list(type) and findById(type, id)',
+      name
+    );
+  }
+});
+
+test('contrato de catálogo falha antes de clock ou persistência', () => {
+  let clockCalls = 0;
+  let persistenceCalls = 0;
+  const clock = { now() { clockCalls += 1; return new Date(); } };
+  const musicRequestRepository = {
+    async findByTelegramUpdateId() { persistenceCalls += 1; return null; },
+    async insert() { persistenceCalls += 1; return null; },
+  };
+
+  assert.throws(
+    () => createMusicPreparationService({
+      catalogRepository: { async listActive() { return []; } },
+      musicRequestRepository,
+      clock,
+    }),
+    (error) => error instanceof TypeError &&
+      error.message === 'catalogRepository must implement list(type) and findById(type, id)'
+  );
+  assert.equal(clockCalls, 0);
+  assert.equal(persistenceCalls, 0);
+});
