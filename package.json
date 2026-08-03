@@ -4,10 +4,11 @@
   "description": "Gerador de músicas personalizadas para Uber/99",
   "main": "backend/server.js",
   "type": "module",
-  "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js"
-  },
+ "scripts": {
+  "start": "node backend/server.js",
+  "dev": "nodemon backend/server.js",
+  "test": "node --test"
+},
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",
     "axios": "^1.6.0",
