@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createTelegramBotService } from '../../backend/telegram-bot/service.js';
+const uuid = '00000000-0000-4000-8000-000000000001';
+function setup(overrides = {}) {
+  const sent = []; const calls = { completes: 0, confirms: 0, attaches: [] };
+  const api = { async sendMessage(chatId, text, options) { sent.push({ chatId, text, options }); }, async answerCallbackQuery() {} };
+  const repository = { async claimUpdate() { return overrides.claim ?? { claimed: true, processing_token: 'token' }; }, async completeUpdate() { calls.completes++; }, async confirm() { calls.confirms++; if (overrides.confirmError) throw overrides.confirmError; return { request_status: 'creation_confirmed' }; }, async getRequest() { return { id: uuid, title: 'Para Ana', style_prompt: 'samba', lyrics: 'letra' }; }, async findByLink() { return overrides.existingLink ?? null; }, async findUnlinked() { return overrides.candidates ?? []; }, async attach(id, user, chat, link) { calls.attaches.push({ id, user, chat, link }); return { request_status: 'linked' }; }, async createLinkSubmission() {}, async latestLinkSubmission() { return overrides.submission ?? null; }, async status() { return { confirmed_creations_count: 2, estimated_credits_consumed: 20 }; }, async cancelPending() { return false; } };
+  const preparationService = { async prepare() { return { request: { id: uuid, title: 'Para Ana', style_name: 'Samba', local_period: 'Noite', local_weekday: 'Segunda' } }; } };
+  return { ...{ sent, calls }, service: createTelegramBotService({ api, repository, preparationService, allowedUserId: 10 }) };
+}
+const msg = (update_id, text, user = 10) => ({ update_id, message: { text, from: { id: user }, chat: { id: 10, type: 'private' } } });
+const cb = (update_id) => ({ update_id, callback_query: { id: 'c', data: `confirm:${uuid}`, from: { id: 10 }, message: { chat: { id: 10, type: 'private' } } } });
+test('bloqueia usuário não autorizado', async () => { const s = setup(); await s.service.processUpdate(msg(1, '/status', 11)); assert.equal(s.sent.length, 0); assert.equal(s.calls.completes, 1); });
+test('update duplicado não processa novamente', async () => { const s = setup({ claim: { claimed: false } }); assert.equal(await s.service.processUpdate(msg(1, '/status')), false); assert.equal(s.sent.length, 0); });
+test('prepara e envia botão', async () => { const s = setup(); await s.service.processUpdate(msg(2, '/musica Ana | F')); assert.match(s.sent[0].text, /Pedido preparado/); assert.equal(s.sent[0].options.reply_markup.inline_keyboard[0][0].callback_data, `confirm:${uuid}`); });
+test('callback repetido usa RPC idempotente e conteúdo separado', async () => { const s = setup(); await s.service.processUpdate(cb(3)); await s.service.processUpdate(cb(4)); assert.equal(s.calls.confirms, 2); assert.equal(s.sent.length, 8); assert.equal(s.sent[3].text, 'https://suno.com/create'); });
+test('associa candidato correto e trata nenhum/ambíguo', async () => { const one = setup({ candidates: [{ id: uuid }] }); await one.service.processUpdate(msg(5, 'https://suno.com/song/a')); assert.equal(one.calls.attaches[0].id, uuid); const none = setup(); await none.service.processUpdate(msg(6, 'https://suno.com/song/a')); assert.match(none.sent[0].text, /Não há pedido/); const many = setup({ candidates: [{ id: uuid, title: 'A' }, { id: '00000000-0000-4000-8000-000000000002', title: 'B' }] }); await many.service.processUpdate(msg(7, 'https://suno.com/song/a')); assert.equal(many.sent[0].options.reply_markup.inline_keyboard.length, 2); });
+test('link repetido é idempotente', async () => { const s = setup({ existingLink: { id: uuid } }); await s.service.processUpdate(msg(8, 'https://suno.com/song/a')); assert.equal(s.calls.attaches.length, 0); });
+test('limite propagado conclui update como falha', async () => { const error = new Error('Limite diário'); const s = setup({ confirmError: error }); await assert.rejects(s.service.processUpdate(cb(9)), error); assert.equal(s.calls.completes, 1); });

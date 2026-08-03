@@ -1,0 +1,53 @@
+function fail(operation, error) { const wrapped = new Error(`Telegram repository ${operation} failed`); wrapped.code = 'TELEGRAM_REPOSITORY_FAILED'; wrapped.cause = error; return wrapped; }
+async function rpcOne(client, name, params) {
+  const { data, error } = await client.rpc(name, params);
+  if (error) throw fail(name, error);
+  if (!Array.isArray(data) || data.length !== 1) throw fail(name, new TypeError('RPC must return exactly one row'));
+  return data[0];
+}
+
+export function createTelegramRepository({ client }) {
+  if (!client?.rpc || !client?.from) throw new TypeError('Supabase service-role client is required');
+  return Object.freeze({
+    claimUpdate: (updateId, payload) => rpcOne(client, 'claim_telegram_update', { p_update_id: updateId, p_payload: payload, p_lease_seconds: 120 }),
+    async completeUpdate(updateId, token, success, error = null) {
+      const result = await client.rpc('complete_telegram_update', { p_update_id: updateId, p_processing_token: token, p_success: success, p_error: error });
+      if (result.error) throw fail('complete_telegram_update', result.error);
+      return result.data === true;
+    },
+    confirm: (requestId, userId, chatId, limit, cost) => rpcOne(client, 'confirm_music_creation', { p_request_id: requestId, p_telegram_user_id: userId, p_telegram_chat_id: chatId, p_daily_limit: limit, p_credit_cost: cost }),
+    attach: (requestId, userId, chatId, link, limit, cost) => rpcOne(client, 'attach_suno_link', { p_request_id: requestId, p_telegram_user_id: userId, p_telegram_chat_id: chatId, p_suno_share_link: link, p_daily_limit: limit, p_credit_cost: cost }),
+    createLinkSubmission: (updateId, userId, chatId, link) => rpcOne(client, 'create_or_get_telegram_link_submission', { p_telegram_update_id: updateId, p_telegram_user_id: userId, p_telegram_chat_id: chatId, p_suno_share_link: link }),
+    async getRequest(id, userId, chatId) {
+      const { data, error } = await client.from('music_requests').select('*').eq('id', id).eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).limit(1);
+      if (error) throw fail('getRequest', error); return data?.[0] ?? null;
+    },
+    async findUnlinked(userId, chatId) {
+      const { data, error } = await client.from('music_requests').select('id,title,passenger_name,creation_confirmed_at').eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('status', 'creation_confirmed').gt('expires_at', new Date().toISOString()).order('creation_confirmed_at', { ascending: false }).limit(5);
+      if (error) throw fail('findUnlinked', error); return data ?? [];
+    },
+    async findByLink(link, userId, chatId) {
+      const { data, error } = await client.from('music_requests').select('id,title').eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('suno_share_link', link).limit(1);
+      if (error) throw fail('findByLink', error); return data?.[0] ?? null;
+    },
+    async latestLinkSubmission(userId, chatId) {
+      const { data, error } = await client.from('telegram_link_submissions').select('id,suno_share_link').eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('status', 'awaiting_selection').gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false }).limit(1);
+      if (error) throw fail('latestLinkSubmission', error); return data?.[0] ?? null;
+    },
+    async completeLinkSubmission(id, requestId, userId, chatId) {
+      const { data, error } = await client.from('telegram_link_submissions').update({ status: 'completed', selected_request_id: requestId, updated_at: new Date().toISOString() }).eq('id', id).eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('status', 'awaiting_selection').select('id');
+      if (error) throw fail('completeLinkSubmission', error);
+      return data?.length === 1;
+    },
+    async status(userId, date) {
+      const { data, error } = await client.from('telegram_daily_usage').select('confirmed_creations_count,estimated_credits_consumed').eq('telegram_user_id', userId).eq('usage_date', date).limit(1);
+      if (error) throw fail('status', error); return data?.[0] ?? { confirmed_creations_count: 0, estimated_credits_consumed: 0 };
+    },
+    async cancelPending(userId, chatId) {
+      const { data: rows, error } = await client.from('music_requests').select('id').eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('status', 'prepared').gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false }).limit(1);
+      if (error) throw fail('cancelLookup', error); if (!rows?.[0]) return false;
+      const result = await client.from('music_requests').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', rows[0].id).eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('status', 'prepared').select('id');
+      if (result.error) throw fail('cancel', result.error); return result.data?.length === 1;
+    },
+  });
+}

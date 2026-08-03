@@ -1,0 +1,70 @@
+import { getLocalContext } from '../music-preparation/local-context.js';
+import { parseMusicCommand, parseSunoLink, splitTelegramText } from './parsers.js';
+
+const HELP = 'Envie /musica Nome | M, F ou N\nExemplo: /musica Maria | F\nDepois confirme, crie no Suno e cole aqui o link HTTPS.\n/status mostra o uso; /cancelar cancela o preparo pendente.';
+const SUNO_CREATE_URL = 'https://suno.com/create';
+function identity(update) { const source = update.message ?? update.callback_query?.message; const from = update.message?.from ?? update.callback_query?.from; return { chatId: source?.chat?.id, chatType: source?.chat?.type, userId: from?.id }; }
+function localDate(clock) { return getLocalContext(clock(), 'America/Sao_Paulo').localDate; }
+
+export function createTelegramBotService({ api, repository, preparationService, allowedUserId, dailyLimit = 8, creditCost = 10, clock = () => new Date() }) {
+  if (!api || !repository || !preparationService) throw new TypeError('Bot dependencies are required');
+  const authorized = String(allowedUserId);
+  async function send(chatId, message, options) { for (const chunk of splitTelegramText(message)) await api.sendMessage(chatId, chunk, options); }
+  async function deliver(chatId, request) { await send(chatId, request.title); await send(chatId, request.style_prompt); await send(chatId, request.lyrics); await send(chatId, SUNO_CREATE_URL, { disable_web_page_preview: false }); }
+  async function confirm(requestId, ids) {
+    let result;
+    try { result = await repository.confirm(requestId, ids.userId, ids.chatId, dailyLimit, creditCost); }
+    catch (error) {
+      if (error?.cause?.message?.includes('Limite diario') || error?.message?.includes('Limite diario')) return send(ids.chatId, `Limite diário de ${dailyLimit} músicas atingido.`);
+      throw error;
+    }
+    if (['expired', 'cancelled'].includes(result.request_status)) return send(ids.chatId, 'Este pedido não está mais disponível. Prepare uma nova música.');
+    const request = await repository.getRequest(requestId, ids.userId, ids.chatId);
+    if (!request) return send(ids.chatId, 'Pedido não encontrado para este chat.');
+    await deliver(ids.chatId, request);
+  }
+  async function attach(requestId, link, ids) {
+    const result = await repository.attach(requestId, ids.userId, ids.chatId, link, dailyLimit, creditCost);
+    if (result.request_status !== 'linked') return send(ids.chatId, 'Não foi possível vincular: o pedido expirou ou foi cancelado.');
+    await send(ids.chatId, 'Música vinculada com sucesso.');
+  }
+  async function handleLink(update, link, ids) {
+    if (await repository.findByLink(link, ids.userId, ids.chatId)) return send(ids.chatId, 'Este link já estava vinculado à sua música.');
+    const candidates = await repository.findUnlinked(ids.userId, ids.chatId);
+    if (candidates.length === 0) return send(ids.chatId, 'Não há pedido confirmado aguardando link neste chat.');
+    if (candidates.length === 1) return attach(candidates[0].id, link, ids);
+    await repository.createLinkSubmission(update.update_id, ids.userId, ids.chatId, link);
+    const keyboard = candidates.map((item) => [{ text: item.title || `Música para ${item.passenger_name}`, callback_data: `link:${item.id}` }]);
+    await send(ids.chatId, 'Há mais de um pedido aguardando. Escolha a música correta:', { reply_markup: { inline_keyboard: keyboard } });
+  }
+  async function callback(update, ids) {
+    const query = update.callback_query; const [action, id, extra] = String(query.data || '').split(':');
+    if (extra || !/^[0-9a-f-]{36}$/iu.test(id || '')) return api.answerCallbackQuery(query.id, { text: 'Ação inválida.' });
+    await api.answerCallbackQuery(query.id);
+    if (action === 'confirm') return confirm(id, ids);
+    if (action === 'link') { const submission = await repository.latestLinkSubmission(ids.userId, ids.chatId); if (!submission) return send(ids.chatId, 'A seleção de link expirou. Cole o link novamente.'); return attach(id, submission.suno_share_link, ids); }
+  }
+  async function message(update, ids) {
+    const text = update.message?.text?.trim(); if (!text) return;
+    const command = text.match(/^\/(\w+)(?:@[A-Za-z0-9_]+)?/u)?.[1]?.toLowerCase();
+    if (command === 'start' || command === 'ajuda') return send(ids.chatId, HELP);
+    if (command === 'status') { const usage = await repository.status(ids.userId, localDate(clock)); const count = usage.confirmed_creations_count ?? 0; return send(ids.chatId, `Uso de hoje: ${count}/${dailyLimit} criações. Saldo diário estimado: ${dailyLimit - count}. Créditos estimados consumidos: ${usage.estimated_credits_consumed ?? count * creditCost}.`); }
+    if (command === 'cancelar') return send(ids.chatId, await repository.cancelPending(ids.userId, ids.chatId) ? 'Preparo pendente cancelado.' : 'Não há preparo pendente para cancelar.');
+    if (command === 'musica') {
+      let parsed; try { parsed = parseMusicCommand(text); } catch { parsed = null; }
+      if (!parsed) return send(ids.chatId, 'Formato inválido. Use: /musica Nome | M, F ou N');
+      const prepared = await preparationService.prepare({ update_id: update.update_id, user_id: ids.userId, chat_id: ids.chatId, name: parsed.passengerName, gender: parsed.gender, selection_mode: 'automatic' }); const req = prepared.request;
+      return send(ids.chatId, `Pedido preparado\nTítulo: ${req.title}\nEstilo: ${req.style_name}\nPeríodo: ${req.local_period}\nDia: ${req.local_weekday}`, { reply_markup: { inline_keyboard: [[{ text: 'Confirmar e criar', callback_data: `confirm:${req.id}` }]] } });
+    }
+    const link = parseSunoLink(text); if (link) return handleLink(update, link, ids);
+    if (/^https?:\/\//iu.test(text)) return send(ids.chatId, 'Link inválido. Envie um link HTTPS do domínio suno.com.');
+    return send(ids.chatId, HELP);
+  }
+  return Object.freeze({ async processUpdate(update) {
+    const claim = await repository.claimUpdate(update.update_id, update); if (!claim.claimed) return false;
+    let success = false; let failure = null;
+    try { const ids = identity(update); if (ids.chatType !== 'private' || String(ids.userId) !== authorized) { success = true; return true; } if (update.callback_query) await callback(update, ids); else await message(update, ids); success = true; return true; }
+    catch (error) { failure = error; throw error; }
+    finally { await repository.completeUpdate(update.update_id, claim.processing_token, success, failure ? 'Falha ao processar update' : null); }
+  } });
+}

@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import musicRouter from './routes/music.js';
 import { supabase, getAll, insertItem, updateItem, deleteItem, TIPOS_VALIDOS } from '../config/database.js';
+import { startTelegramPolling } from './telegram-bot/runtime.js';
 
 dotenv.config();
 
@@ -147,8 +148,17 @@ app.delete('/api/admin/delete/:tipo/:id', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
+
+const telegramPoller = startTelegramPolling();
+async function shutdown(signal) {
+  console.log(`[Server] Encerrando por ${signal}`);
+  await telegramPoller?.stop();
+  server.close(() => process.exit(0));
+}
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
 
 export default app;
