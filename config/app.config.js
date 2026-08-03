@@ -11,8 +11,6 @@ export const config = {
     estimatedCreditCost: process.env.ESTIMATED_CREDIT_COST || '10',
   },
 
-  chromiumPath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
-
   musicPreparation: {
     timezone: 'America/Sao_Paulo',
     requestTtlHours: 12,

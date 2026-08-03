@@ -1,5 +1,6 @@
 import { getLocalContext } from '../music-preparation/local-context.js';
 import { parseMusicCommand, parseSunoLink, splitTelegramText } from './parsers.js';
+import { isPermanentUpdateError, TelegramUpdateLeaseError } from './update-errors.js';
 
 const HELP = 'Envie /musica Nome | M, F ou N\nExemplo: /musica Maria | F\nDepois confirme, crie no Suno e cole aqui o link HTTPS.\n/status mostra o uso; /cancelar cancela o preparo pendente.';
 const SUNO_CREATE_URL = 'https://suno.com/create';
@@ -67,10 +68,34 @@ export function createTelegramBotService({ api, repository, preparationService, 
     return send(ids.chatId, HELP);
   }
   return Object.freeze({ async processUpdate(update) {
-    const claim = await repository.claimUpdate(update.update_id, update); if (!claim.claimed) return false;
-    let success = false; let failure = null;
-    try { const ids = identity(update); if (ids.chatType !== 'private' || String(ids.userId) !== authorized) { success = true; return true; } if (update.callback_query) await callback(update, ids); else await message(update, ids); success = true; return true; }
-    catch (error) { failure = error; throw error; }
-    finally { await repository.completeUpdate(update.update_id, claim.processing_token, success, failure ? 'Falha ao processar update' : null); }
+    const persisted = await repository.getUpdateState(update.update_id);
+    if (persisted?.processing_status === 'failed' && persisted.last_error === 'Erro permanente de domínio') return false;
+    const claim = await repository.claimUpdate(update.update_id, update);
+    if (!claim.claimed) {
+      const state = await repository.getUpdateState(update.update_id);
+      const terminal = state?.processing_status === 'processed' ||
+        (state?.processing_status === 'failed' && state.last_error === 'Erro permanente de domínio');
+      if (!terminal) throw new TelegramUpdateLeaseError();
+      return false;
+    }
+    try {
+      const ids = identity(update);
+      if (ids.chatType === 'private' && String(ids.userId) === authorized) {
+        if (update.callback_query) await callback(update, ids); else await message(update, ids);
+      }
+      const completed = await repository.completeUpdate(update.update_id, claim.processing_token, true, null);
+      if (completed === false) throw new TelegramUpdateLeaseError();
+      return true;
+    } catch (error) {
+      if (!isPermanentUpdateError(error)) throw error;
+      const ids = identity(update);
+      if (ids.chatType === 'private' && String(ids.userId) === authorized) {
+        const limitReached = [error?.message, error?.cause?.message].some((value) => value?.includes('Limite diario'));
+        await send(ids.chatId, limitReached ? `Limite diário de ${dailyLimit} músicas atingido.` : 'Não foi possível concluir este pedido. Verifique o comando ou o catálogo e tente novamente.');
+      }
+      const completed = await repository.completeUpdate(update.update_id, claim.processing_token, false, 'Erro permanente de domínio');
+      if (completed === false) throw new TelegramUpdateLeaseError();
+      return true;
+    }
   } });
 }

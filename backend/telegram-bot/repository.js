@@ -10,6 +10,11 @@ export function createTelegramRepository({ client }) {
   if (!client?.rpc || !client?.from) throw new TypeError('Supabase service-role client is required');
   return Object.freeze({
     claimUpdate: (updateId, payload) => rpcOne(client, 'claim_telegram_update', { p_update_id: updateId, p_payload: payload, p_lease_seconds: 120 }),
+    async getUpdateState(updateId) {
+      const { data, error } = await client.from('telegram_updates').select('processing_status,last_error').eq('update_id', updateId).limit(1);
+      if (error) throw fail('getUpdateState', error);
+      return data?.[0] ?? null;
+    },
     async completeUpdate(updateId, token, success, error = null) {
       const result = await client.rpc('complete_telegram_update', { p_update_id: updateId, p_processing_token: token, p_success: success, p_error: error });
       if (result.error) throw fail('complete_telegram_update', result.error);

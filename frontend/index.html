@@ -19,14 +19,6 @@
     .footer-nav a { color: #444; text-decoration: none; font-size: 12px; transition: color 0.2s; }
     .footer-nav a:hover { color: #666; }
 
-    .progress-card { background: #1E1E1E; border-radius: 12px; padding: 20px; margin-top: 15px; display: none; }
-    .progress-bar-bg { background: #333; border-radius: 8px; height: 8px; overflow: hidden; margin: 12px 0; }
-    .progress-bar-fill { background: #1DB954; height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 8px; }
-    .progress-text { text-align: center; color: #aaa; font-size: 14px; }
-    .progress-step { color: #1DB954; font-size: 13px; margin-top: 8px; text-align: center; }
-    .progress-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #333; border-top-color: #1DB954; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
     .result-card { background: #1E1E1E; border-radius: 12px; padding: 20px; margin-top: 15px; display: none; }
     .result-card.success { border: 1px solid #1DB954; }
     .result-card.error { border: 1px solid #d32f2f; }
@@ -93,13 +85,7 @@
     <div id="previewBox" class="preview-box">Preencha os campos para montar o roteiro...</div>
   </div>
 
-  <button id="btnGerar" onclick="gerarMusica()">🎧 GERAR E ENVIAR</button>
-
-  <div id="progressCard" class="progress-card">
-    <div class="progress-text"><span class="progress-spinner"></span> <span id="progressMsg">Iniciando...</span></div>
-    <div class="progress-bar-bg"><div id="progressBar" class="progress-bar-fill"></div></div>
-    <div class="progress-step" id="progressStep"></div>
-  </div>
+  <button id="btnGerar" onclick="gerarMusica()">🎧 PREPARAR PARA O SUNO</button>
 
   <div id="resultCard" class="result-card"></div>
 
@@ -182,24 +168,16 @@
       box.style.display = 'block';
     }
 
-    let pollTimer = null;
-
     async function gerarMusica() {
       const nome = document.getElementById('nome').value.trim();
       if (!nome) return alert('Digite o nome do passageiro!');
 
       const btn = document.getElementById('btnGerar');
-      const progressCard = document.getElementById('progressCard');
       const resultCard = document.getElementById('resultCard');
 
       btn.disabled = true;
-      btn.innerText = '⏳ Gerando...';
-      progressCard.style.display = 'block';
+      btn.innerText = '⏳ Preparando...';
       resultCard.style.display = 'none';
-
-      updateProgress(5, 'Enviando dados para o servidor...');
-
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 
       try {
         const res = await fetch('/api/music/generate', {
@@ -217,75 +195,37 @@
         });
         const data = await res.json();
 
-        if (data.success && data.jobId) {
-          updateProgress(10, 'Geração iniciada...');
-          pollStatus(data.jobId);
-          pollTimer = setInterval(() => pollStatus(data.jobId), 5000);
-        } else {
-          showResult(false, data.error || 'Erro desconhecido');
-        }
+        if (data.success) showManualResult(data);
+        else showResult(false, data.error || 'Erro desconhecido');
       } catch (e) {
         showResult(false, 'Erro de conexão com o servidor');
       }
     }
 
-    function updateProgress(percent, msg) {
-      document.getElementById('progressBar').style.width = percent + '%';
-      document.getElementById('progressMsg').innerText = msg;
-    }
-
     function showResult(success, message, shareLink) {
-      const progressCard = document.getElementById('progressCard');
       const resultCard = document.getElementById('resultCard');
       const btn = document.getElementById('btnGerar');
 
-      progressCard.style.display = 'none';
       resultCard.style.display = 'block';
       resultCard.className = 'result-card ' + (success ? 'success' : 'error');
 
       if (success && shareLink) {
-        resultCard.innerHTML = `<div class="result-title success">✅ Música pronta!</div>` +
+        resultCard.innerHTML = `<div class="result-title success">✅ Conteúdo preparado</div>` +
           `<div style="color:#aaa;margin-bottom:10px">${message}</div>` +
-          `<a href="${shareLink}" target="_blank" class="result-link">▶️ Tocar Música</a>`;
+          `<a href="${shareLink}" target="_blank" rel="noopener noreferrer" class="result-link">Abrir Suno</a>`;
       } else {
         resultCard.innerHTML = `<div class="result-title error">❌ Erro</div>` +
           `<div style="color:#aaa">${message}</div>`;
       }
 
       btn.disabled = false;
-      btn.innerText = '🎧 GERAR E ENVIAR';
-      carregarSalvas();
+      btn.innerText = '🎧 PREPARAR PARA O SUNO';
     }
 
-    async function pollStatus(jobId) {
-      try {
-        const res = await fetch(`/api/music/status/${jobId}`);
-        const data = await res.json();
-
-        if (data.status === 'completed') {
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-          updateProgress(100, 'Concluído!');
-          showResult(true, data.telegramSent ? 'Link enviado no Telegram!' : 'Música pronta!', data.shareLink);
-        } else if (data.status === 'failed') {
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-          showResult(false, data.error || 'Falha na geração');
-        } else {
-          let percent = 15;
-          if (data.progress && data.progress.includes('Abrindo')) percent = 15;
-          else if (data.progress && data.progress.includes('login') || data.progress && data.progress.includes('Login')) percent = 20;
-          else if (data.progress && data.progress.includes('Navegando')) percent = 30;
-          else if (data.progress && data.progress.includes('Configurando')) percent = 35;
-          else if (data.progress && data.progress.includes('Preenchendo')) percent = 50;
-          else if (data.progress && data.progress.includes('Clicando')) percent = 60;
-          else if (data.progress && data.progress.includes('Aguardando')) percent = 70;
-          else if (data.progress && data.progress.includes('Gerando')) percent = 75;
-          else if (data.progress && data.progress.includes('pronta')) percent = 95;
-
-          updateProgress(percent, data.progress || 'Processando...');
-        }
-      } catch (e) {
-        console.error('Poll error:', e);
-      }
+    function showManualResult(data) {
+      const content = `Título: ${data.title}\n\nEstilo: ${data.style}\n\nLetra:\n${data.lyrics}`;
+      showResult(true, 'Conteúdo preparado. Copie os campos e conclua a criação manualmente no Suno.', 'https://suno.com/create');
+      document.getElementById('resultCard').insertAdjacentHTML('beforeend', `<pre class="preview-box" style="display:block">${escapeHtml(content)}</pre>`);
     }
 
     async function carregarSalvas() {
