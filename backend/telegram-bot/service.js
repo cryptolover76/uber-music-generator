@@ -1,17 +1,31 @@
 import { getLocalContext } from '../music-preparation/local-context.js';
-import { parseMusicCommand, parseSunoLink, splitTelegramText } from './parsers.js';
+import { parseMusicCommand, parseSunoLink, splitCopyText, splitTelegramText } from './parsers.js';
 import { isPermanentUpdateError, TelegramUpdateLeaseError } from './update-errors.js';
+import { createGuidedMusicFlow } from './guided-flow.js';
 
-const HELP = 'Envie /musica Nome | M, F ou N\nExemplo: /musica Maria | F\nDepois confirme, crie no Suno e cole aqui o link HTTPS.\n/status mostra o uso; /cancelar cancela o preparo pendente.';
+const HELP = 'Envie /musica Nome\nExemplo: /musica Maria da Silva\nEscolha gênero e ritmo, confirme, crie no Suno e cole aqui o link HTTPS.\n/status mostra o uso; /cancelar cancela a interação pendente.';
 const SUNO_CREATE_URL = 'https://suno.com/create';
 function identity(update) { const source = update.message ?? update.callback_query?.message; const from = update.message?.from ?? update.callback_query?.from; return { chatId: source?.chat?.id, chatType: source?.chat?.type, userId: from?.id }; }
 function localDate(clock) { return getLocalContext(clock(), 'America/Sao_Paulo').localDate; }
 
-export function createTelegramBotService({ api, repository, preparationService, allowedUserId, dailyLimit = 8, creditCost = 10, clock = () => new Date() }) {
+export function createTelegramBotService({ api, repository, preparationService, styleCatalog, prepareWithStyle, allowedUserId, dailyLimit = 8, creditCost = 10, clock = () => new Date() }) {
   if (!api || !repository || !preparationService) throw new TypeError('Bot dependencies are required');
   const authorized = String(allowedUserId);
   async function send(chatId, message, options) { for (const chunk of splitTelegramText(message)) await api.sendMessage(chatId, chunk, options); }
-  async function deliver(chatId, request) { await send(chatId, request.title); await send(chatId, request.style_prompt); await send(chatId, request.lyrics); await send(chatId, SUNO_CREATE_URL, { disable_web_page_preview: false }); }
+  const guided = createGuidedMusicFlow({ api, repository, styleCatalog, prepareWithStyle, send });
+  async function copyField(chatId, heading, value, buttonLabel) {
+    const chunks = splitCopyText(value);
+    for (let index = 0; index < chunks.length; index += 1) {
+      const suffix = chunks.length > 1 ? ` ${index + 1}` : '';
+      await api.sendMessage(chatId, `${heading}${suffix}\n${chunks[index]}`, { reply_markup: { inline_keyboard: [[{ text: `${buttonLabel}${suffix}`, copy_text: { text: chunks[index] } }]] } });
+    }
+  }
+  async function deliver(chatId, request) {
+    await copyField(chatId, 'Título', request.title, '📋 Copiar título');
+    await copyField(chatId, 'Ritmo/prompt de estilo', request.style_prompt, '📋 Copiar estilo');
+    await copyField(chatId, 'Letra', request.lyrics, '📋 Copiar letra');
+    await api.sendMessage(chatId, SUNO_CREATE_URL, { disable_web_page_preview: false, reply_markup: { inline_keyboard: [[{ text: '🎵 Abrir Suno', url: SUNO_CREATE_URL }]] } });
+  }
   async function confirm(requestId, ids) {
     let result;
     try { result = await repository.confirm(requestId, ids.userId, ids.chatId, dailyLimit, creditCost); }
@@ -39,6 +53,8 @@ export function createTelegramBotService({ api, repository, preparationService, 
     await send(ids.chatId, 'Há mais de um pedido aguardando. Escolha a música correta:', { reply_markup: { inline_keyboard: keyboard } });
   }
   async function callback(update, ids) {
+    const guidedHandled = await guided.callback(update, ids);
+    if (guidedHandled) return;
     const query = update.callback_query; const [action, id, extra] = String(query.data || '').split(':');
     if (extra || !/^[0-9a-f-]{36}$/iu.test(id || '')) return api.answerCallbackQuery(query.id, { text: 'Ação inválida.' });
     await api.answerCallbackQuery(query.id);
@@ -56,10 +72,15 @@ export function createTelegramBotService({ api, repository, preparationService, 
     const command = text.match(/^\/(\w+)(?:@[A-Za-z0-9_]+)?/u)?.[1]?.toLowerCase();
     if (command === 'start' || command === 'ajuda') return send(ids.chatId, HELP);
     if (command === 'status') { const usage = await repository.status(ids.userId, localDate(clock)); const count = usage.confirmed_creations_count ?? 0; return send(ids.chatId, `Uso de hoje: ${count}/${dailyLimit} criações. Saldo diário estimado: ${dailyLimit - count}. Créditos estimados consumidos: ${usage.estimated_credits_consumed ?? count * creditCost}.`); }
-    if (command === 'cancelar') return send(ids.chatId, await repository.cancelPending(ids.userId, ids.chatId) ? 'Preparo pendente cancelado.' : 'Não há preparo pendente para cancelar.');
+    if (command === 'cancelar') {
+      const guidedCancelled = await guided.cancel(ids);
+      const cancelled = guidedCancelled || await repository.cancelPending(ids.userId, ids.chatId);
+      return send(ids.chatId, cancelled ? 'Interação pendente cancelada.' : 'Não há interação pendente para cancelar.');
+    }
     if (command === 'musica') {
       let parsed; try { parsed = parseMusicCommand(text); } catch { parsed = null; }
-      if (!parsed) return send(ids.chatId, 'Formato inválido. Use: /musica Nome | M, F ou N');
+      if (!parsed) return send(ids.chatId, 'Formato inválido. Use: /musica Nome');
+      if (await guided.start(update, ids, parsed)) return;
       const prepared = await preparationService.prepare({ update_id: update.update_id, user_id: ids.userId, chat_id: ids.chatId, name: parsed.passengerName, gender: parsed.gender, selection_mode: 'automatic' }); const req = prepared.request;
       return send(ids.chatId, `Pedido preparado\nTítulo: ${req.title}\nEstilo: ${req.style_name}\nPeríodo: ${req.local_period}\nDia: ${req.local_weekday}`, { reply_markup: { inline_keyboard: [[{ text: 'Confirmar e criar', callback_data: `confirm:${req.id}` }]] } });
     }

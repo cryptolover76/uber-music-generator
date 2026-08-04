@@ -222,3 +222,29 @@ export function createMusicPreparationService({
     },
   });
 }
+
+export async function prepareMusicRequestWithStyle({
+  preparationService,
+  catalogRepository,
+  catalogSelector = defaultCatalogSelector,
+}, rawInput, styleId) {
+  if (typeof preparationService?.prepare !== 'function') throw new TypeError('preparationService.prepare is required');
+  validateCatalogRepository(catalogRepository);
+  const input = validateMusicPreparationInput({ ...rawInput, selection_mode: 'automatic' });
+  const [templates, style] = await Promise.all([
+    listCatalog(catalogRepository, 'template'),
+    findCatalog(catalogRepository, 'style', styleId),
+  ]);
+  const template = select(catalogSelector, {
+    items: templates,
+    telegramUpdateId: input.telegram_update_id,
+    catalogType: 'template',
+  });
+  const validatedStyle = ensureManualItem(style, 'style', styleId);
+  return preparationService.prepare({
+    ...rawInput,
+    selection_mode: 'manual',
+    template_id: template.id,
+    style_id: validatedStyle.id,
+  });
+}

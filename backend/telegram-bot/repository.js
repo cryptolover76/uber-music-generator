@@ -15,6 +15,36 @@ export function createTelegramRepository({ client }) {
       if (error) throw fail('getUpdateState', error);
       return data?.[0] ?? null;
     },
+    async getGuidedUpdate(updateId) {
+      const { data, error } = await client.from('telegram_updates').select('update_id,payload,processing_status,last_error,received_at').eq('update_id', updateId).limit(1);
+      if (error) throw fail('getGuidedUpdate', error);
+      return data?.[0] ?? null;
+    },
+    async listRecentUpdates(limit = 50) {
+      const { data, error } = await client.from('telegram_updates').select('update_id,payload,processing_status,last_error,received_at').order('received_at', { ascending: false }).limit(limit);
+      if (error) throw fail('listRecentUpdates', error);
+      return data ?? [];
+    },
+    async acquireGuidedFinalization(updateId, processingUpdateId) {
+      const marker = `GUIDED_FINALIZING:${processingUpdateId}`;
+      const { data, error } = await client.from('telegram_updates').update({ last_error: marker, updated_at: new Date().toISOString() }).eq('update_id', updateId).eq('processing_status', 'processed').is('last_error', null).select('update_id');
+      if (error) throw fail('acquireGuidedFinalization', error);
+      return data?.length === 1 ? marker : null;
+    },
+    async finishGuidedFinalization(updateId, marker) {
+      const { data, error } = await client.from('telegram_updates').update({ last_error: 'GUIDED_COMPLETED', updated_at: new Date().toISOString() }).eq('update_id', updateId).eq('last_error', marker).select('update_id');
+      if (error) throw fail('finishGuidedFinalization', error);
+      return data?.length === 1;
+    },
+    async releaseGuidedFinalization(updateId, marker) {
+      const { error } = await client.from('telegram_updates').update({ last_error: null, updated_at: new Date().toISOString() }).eq('update_id', updateId).eq('last_error', marker);
+      if (error) throw fail('releaseGuidedFinalization', error);
+    },
+    async cancelGuidedUpdate(updateId) {
+      const { data, error } = await client.from('telegram_updates').update({ last_error: 'GUIDED_CANCELLED', updated_at: new Date().toISOString() }).eq('update_id', updateId).eq('processing_status', 'processed').is('last_error', null).select('update_id');
+      if (error) throw fail('cancelGuidedUpdate', error);
+      return data?.length === 1;
+    },
     async completeUpdate(updateId, token, success, error = null) {
       const result = await client.rpc('complete_telegram_update', { p_update_id: updateId, p_processing_token: token, p_success: success, p_error: error });
       if (result.error) throw fail('complete_telegram_update', result.error);
