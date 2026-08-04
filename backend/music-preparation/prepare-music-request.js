@@ -8,6 +8,7 @@ const CATALOG_TYPES = Object.freeze({
   style: 'styles',
   period: 'periods',
   weekday: 'weekdays',
+  climate: 'climates',
 });
 
 export class MusicRequestConflictError extends MusicPreparationError {
@@ -31,7 +32,8 @@ function sameRequest(existing, input) {
     existing.passenger_gender === input.passenger_gender &&
     existing.selection_mode === input.selection_mode &&
     (input.selection_mode !== 'manual' ||
-      (existing.template_id === input.template_id && existing.style_id === input.style_id));
+      (existing.template_id === input.template_id && existing.style_id === input.style_id)) &&
+    existing.climate_id === input.climate_id;
 }
 
 function toDto(request) {
@@ -161,7 +163,10 @@ export function createMusicPreparationService({
         category: weekdayCategory,
       });
 
-      const clima = null;
+      let clima = null;
+      if (input.climate_id) {
+        clima = ensureManualItem(await findCatalog(catalogRepository, 'climate', input.climate_id), 'climate', input.climate_id);
+      }
       const partes = [periodo, clima, dia].filter(Boolean);
       const lyrics = montarLetra(partes, template, input.passenger_name, input.passenger_gender);
       const title = `Para ${input.passenger_name}`;
@@ -177,16 +182,16 @@ export function createMusicPreparationService({
         selection_mode: input.selection_mode,
         template_id: template.id,
         style_id: style.id,
-        climate_id: null,
+        climate_id: clima?.id ?? null,
         period_id: periodo.id,
         weekday_id: dia.id,
         timezone,
         local_datetime: createdAt,
         local_weekday: context.localWeekday,
         local_period: context.localPeriod,
-        weather_status: 'not_requested',
-        weather_summary: null,
-        weather_provider: null,
+        weather_status: input.weather_status,
+        weather_summary: input.weather_summary,
+        weather_provider: input.weather_provider,
         title,
         style_name: style.name,
         style_prompt: stylePrompt,

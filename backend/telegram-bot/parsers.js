@@ -43,28 +43,47 @@ export function escapeHtml(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
-export function splitCopyText(text, limit = 256) {
+export function graphemeLength(text) {
   if (typeof text !== 'string') throw new TypeError('text must be a string');
-  if (!Number.isInteger(limit) || limit < 1 || limit > 256) throw new TypeError('copy_text limit must be between 1 and 256');
-  const chunks = [];
   const segmenter = new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
-  let remaining = Array.from(segmenter.segment(text), ({ segment }) => segment);
-  while (remaining.length > limit) {
-    const window = remaining.slice(0, limit);
-    let cut = -1;
-    for (let index = window.length - 1; index > 0; index -= 1) {
-      if (window[index - 1] === '\n' && window[index] === '\n') { cut = index + 1; break; }
+  return Array.from(segmenter.segment(text)).length;
+}
+
+export function splitPreformattedText(text, escapedLimit = 3800) {
+  if (typeof text !== 'string') throw new TypeError('text must be a string');
+  if (!Number.isInteger(escapedLimit) || escapedLimit < 16) throw new TypeError('escapedLimit must be at least 16');
+  const segmenter = new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
+  const units = Array.from(segmenter.segment(text), ({ segment }) => segment);
+  if (units.length === 0) return [''];
+  const prefix = [0];
+  for (const unit of units) prefix.push(prefix.at(-1) + escapeHtml(unit).length);
+  const maxEnd = (start) => {
+    let low = start + 1; let high = units.length; let result = start;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      if (prefix[middle] - prefix[start] <= escapedLimit) { result = middle; low = middle + 1; } else high = middle - 1;
     }
-    if (cut < 1) cut = window.lastIndexOf('\n') + 1;
-    if (cut < 1) {
-      for (let index = window.length - 1; index > 0; index -= 1) {
-        if (/\s/u.test(window[index])) { cut = index + 1; break; }
+    if (result === start) throw new RangeError('escapedLimit cannot fit one grapheme');
+    return result;
+  };
+  const blocksFrom = (start) => { let count = 0; while (start < units.length) { start = maxEnd(start); count += 1; } return count; };
+  const chunks = [];
+  let start = 0;
+  while (start < units.length) {
+    const furthest = maxEnd(start);
+    if (furthest === units.length) { chunks.push(units.slice(start).join('')); break; }
+    const remainingBlocks = blocksFrom(furthest);
+    const findPreferredCut = (paragraphsOnly) => {
+      for (let candidate = furthest - 1; candidate > start; candidate -= 1) {
+        const isParagraph = units[candidate - 1] === '\n' && units[candidate] === '\n';
+        const isLine = units[candidate - 1] === '\n';
+        if ((paragraphsOnly ? isParagraph : isLine) && blocksFrom(candidate) === remainingBlocks) return candidate;
       }
-    }
-    if (cut < 1) cut = limit;
-    chunks.push(remaining.slice(0, cut).join(''));
-    remaining = remaining.slice(cut);
+      return null;
+    };
+    const cut = findPreferredCut(true) ?? findPreferredCut(false) ?? furthest;
+    chunks.push(units.slice(start, cut).join(''));
+    start = cut;
   }
-  if (remaining.length || chunks.length === 0) chunks.push(remaining.join(''));
   return chunks;
 }

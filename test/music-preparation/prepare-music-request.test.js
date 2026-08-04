@@ -7,7 +7,7 @@ import { DuplicateTelegramUpdateError, MusicRequestPersistenceError } from '../.
 const ids = Object.freeze({
   template: '00000000-0000-4000-8000-000000000001', style: '00000000-0000-4000-8000-000000000002',
   period: '00000000-0000-4000-8000-000000000003', weekday: '00000000-0000-4000-8000-000000000004',
-  weekend: '00000000-0000-4000-8000-000000000005',
+  weekend: '00000000-0000-4000-8000-000000000005', climate: '00000000-0000-4000-8000-000000000006',
 });
 
 function catalogs({ exactWeekend = true } = {}) {
@@ -44,6 +44,13 @@ test('modo automático compõe período, clima ausente, dia e template com monta
   assert.equal(dto.style_prompt, 'samba alegre');
   assert.equal(dto.lyrics, lyrics);
   assert.equal(dto.prompt_final, `Tags: samba alegre\n\n---\n\n${lyrics}`);
+});
+
+test('clima selecionado compõe período, clima e dia e persiste metadados compatíveis', async () => {
+  const withClimate = catalogs(); withClimate.climates = [{ id: ids.climate, active: true, name: 'Ensolarado', categoria: 'Ensolarado', texto: 'Clima ensolarado com {NOME}.' }];
+  const dto = await service({ catalogs: withClimate }).instance.prepare(input({ climate_id: ids.climate, weather_summary: 'Ensolarado; temperatura 25 °C', weather_provider: 'open-meteo' }));
+  assert.equal(dto.request.climate_id, ids.climate); assert.equal(dto.request.weather_status, 'applied'); assert.equal(dto.request.weather_provider, 'open-meteo');
+  assert.equal(dto.lyrics, '[Verse 1]\nNoite com Ana.\n\n[Verse 2]\nClima ensolarado com Ana.\n\n[Verse 3]\nSábado de Ana.\n\n[Chorus]\nOlá, Ana!');
 });
 
 test('fim de semana usa categoria exata ou fallback', async () => {

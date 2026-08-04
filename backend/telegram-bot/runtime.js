@@ -6,6 +6,7 @@ import { createTelegramApi } from './telegram-api.js';
 import { createTelegramRepository } from './repository.js';
 import { createTelegramBotService } from './service.js';
 import { createLongPoller } from './polling.js';
+import { createWeatherService } from './weather.js';
 
 function positiveInteger(name, value, fallback) { const raw = value ?? fallback; if (!/^\d+$/u.test(String(raw)) || Number(raw) < 1 || !Number.isSafeInteger(Number(raw))) throw new Error(`${name} must be a positive integer`); return Number(raw); }
 function nonNegativeInteger(name, value, fallback) { const raw = value ?? fallback; if (!/^\d+$/u.test(String(raw)) || !Number.isSafeInteger(Number(raw))) throw new Error(`${name} must be a non-negative integer`); return Number(raw); }
@@ -18,7 +19,8 @@ export function createTelegramRuntime({ env = process.env, fetchImpl = globalThi
   const styleCatalog = createSupabaseCatalogRepository({ client });
   const preparationService = createMusicPreparationService({ catalogRepository: styleCatalog, musicRequestRepository: createSupabaseMusicRequestRepository({ client }) });
   const prepareWithStyle = (input, styleId) => prepareMusicRequestWithStyle({ preparationService, catalogRepository: styleCatalog }, input, styleId);
-  const bot = createTelegramBotService({ api, repository, preparationService, styleCatalog, prepareWithStyle, allowedUserId, dailyLimit: positiveInteger('DAILY_MUSIC_LIMIT', env.DAILY_MUSIC_LIMIT, 8), creditCost: nonNegativeInteger('ESTIMATED_CREDIT_COST', env.ESTIMATED_CREDIT_COST, 10) });
+  const weatherService = createWeatherService({ fetchImpl });
+  const bot = createTelegramBotService({ api, repository, preparationService, styleCatalog, prepareWithStyle, weatherService, allowedUserId, dailyLimit: positiveInteger('DAILY_MUSIC_LIMIT', env.DAILY_MUSIC_LIMIT, 8), creditCost: nonNegativeInteger('ESTIMATED_CREDIT_COST', env.ESTIMATED_CREDIT_COST, 10) });
   return createLongPoller({ api, processUpdate: bot.processUpdate, logger });
 }
 export function startTelegramPolling(options = {}) { if (!telegramPollingEnabled(options.env)) return null; const poller = createTelegramRuntime(options); poller.start(); return poller; }

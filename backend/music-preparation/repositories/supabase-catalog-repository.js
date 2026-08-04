@@ -3,6 +3,7 @@ const CATALOGS = Object.freeze({
   styles: Object.freeze({ table: 'estilos', columns: 'id,name,prompt,active,categoria' }),
   periods: Object.freeze({ table: 'periodos', columns: 'id,name,texto,active,categoria' }),
   weekdays: Object.freeze({ table: 'dias_semana', columns: 'id,name,texto,active,categoria' }),
+  climates: Object.freeze({ table: 'climas', columns: 'id,name,texto,active,categoria' }),
 });
 
 export class CatalogRepositoryError extends Error {

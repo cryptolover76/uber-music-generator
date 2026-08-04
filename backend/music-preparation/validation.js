@@ -96,6 +96,10 @@ export function validateMusicPreparationInput(input) {
     selection_mode: mode,
     template_id: normalizeUuid(rawTemplateId, 'template_id', { required: mode === 'manual' }),
     style_id: normalizeUuid(rawStyleId, 'style_id', { required: mode === 'manual' }),
+    climate_id: normalizeUuid(input.climate_id ?? input.climateId, 'climate_id'),
+    weather_status: (input.climate_id ?? input.climateId) ? 'applied' : 'not_requested',
+    weather_summary: typeof input.weather_summary === 'string' && input.weather_summary.trim() ? input.weather_summary.trim().slice(0, 500) : null,
+    weather_provider: input.weather_provider === 'open-meteo' ? 'open-meteo' : null,
   });
 }
 

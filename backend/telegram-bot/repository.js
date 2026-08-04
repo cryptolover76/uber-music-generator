@@ -74,6 +74,15 @@ export function createTelegramRepository({ client }) {
       if (error) throw fail('completeLinkSubmission', error);
       return data?.length === 1;
     },
+    async getLocation(userId, chatId) {
+      const { data, error } = await client.from('telegram_user_locations').select('telegram_user_id,telegram_chat_id,latitude,longitude,updated_at').eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).limit(1);
+      if (error) throw fail('getLocation', error); return data?.[0] ?? null;
+    },
+    async saveLocation(userId, chatId, latitude, longitude) {
+      const row = { telegram_user_id: userId, telegram_chat_id: chatId, latitude, longitude, updated_at: new Date().toISOString() };
+      const { data, error } = await client.from('telegram_user_locations').upsert(row, { onConflict: 'telegram_user_id' }).select('telegram_user_id,telegram_chat_id');
+      if (error) throw fail('saveLocation', error); return data?.[0] ?? null;
+    },
     async status(userId, date) {
       const { data, error } = await client.from('telegram_daily_usage').select('confirmed_creations_count,estimated_credits_consumed').eq('telegram_user_id', userId).eq('usage_date', date).limit(1);
       if (error) throw fail('status', error); return data?.[0] ?? { confirmed_creations_count: 0, estimated_credits_consumed: 0 };
