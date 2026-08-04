@@ -19,9 +19,9 @@ test('catálogo vazio informa ausência de ritmos ativos', async () => {
   assert.equal(setup.sent[0], 'Não há ritmos ativos no momento.');
 });
 
-test('callback guiado fabricado para formato antigo é rejeitado', async () => {
+test('formato antigo permanece compatível com callback guiado', async () => {
   const setup = flowWith(row('/musica Carlos | M'));
   await setup.flow.callback(callback('g:100:F'), ids);
-  assert.equal(setup.answers[0].text, 'Opção inválida ou expirada.');
-  assert.equal(setup.sent.length, 0);
+  assert.equal(setup.answers[0].text, undefined);
+  assert.equal(setup.sent[0], 'Não há ritmos ativos no momento.');
 });

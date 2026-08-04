@@ -18,7 +18,7 @@ function commandFrom(row, ids) {
   const text = row.payload?.message?.text;
   try {
     const parsed = parseMusicCommand(text);
-    if (parsed?.gender == null) return parsed;
+    if (parsed) return { ...parsed, gender: null };
     if (typeof text === 'string' && !text.startsWith('/') && !text.startsWith('🎵') && !text.startsWith('📊') && !text.startsWith('📍') && !text.startsWith('❌')) return { passengerName: normalizePassengerName(text), gender: null };
   } catch {}
   return null;
@@ -90,7 +90,17 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
     },
     async callback(update, ids) {
       const query = update.callback_query; const data = String(query?.data || ''); let match = data.match(/^g:(\d+):([MFN])$/u);
-      if (match) { const original = await repository.getGuidedUpdate(match[1]); const command = commandFrom(original, ids); if (!command) { await invalid(query); return true; } if (terminalState(original)) { await api.answerCallbackQuery(query.id, { text: 'Pedido já processado.' }); return true; } await api.answerCallbackQuery(query.id); await showStyles(ids.chatId, String(update.update_id), match[1], 0); return true; }
+      if (match) {
+        const original = await repository.getGuidedUpdate(match[1]); const command = commandFrom(original, ids);
+        if (!command) { await invalid(query); return true; }
+        if (terminalState(original)) { await api.answerCallbackQuery(query.id, { text: 'Pedido já processado.' }); return true; }
+        if (typeof repository.listRecentUpdates === 'function') {
+          const rows = await repository.listRecentUpdates();
+          const repeated = rows.some((row) => String(row.update_id) !== String(update.update_id) && row.processing_status === 'processed' && owner(row.payload, ids) && row.payload?.callback_query?.data === data);
+          if (repeated) { await api.answerCallbackQuery(query.id, { text: 'Opção já selecionada.' }); return true; }
+        }
+        await api.answerCallbackQuery(query.id); await showStyles(ids.chatId, String(update.update_id), match[1], 0); return true;
+      }
       match = data.match(/^p:(\d+):(\d+)$/u);
       if (match) { const state = await originalFromGender(match[1], ids); if (!state || terminalState(state.original)) { await invalid(query); return true; } await api.answerCallbackQuery(query.id); await showStyles(ids.chatId, match[1], state.original.update_id, Number(match[2])); return true; }
       match = data.match(/^r:(\d+):([0-9a-f-]{36})$/iu);
