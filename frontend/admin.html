@@ -55,8 +55,18 @@
     <div class="form-title" id="formTitle">Adicionar Novo</div>
     <input type="hidden" id="editId">
 
-    <label>Nome da Opção (ex: "Chuvoso Aconchegante")</label>
-    <input type="text" id="nome" placeholder="Ex: Intro Chuva, Verso Sexta-feira">
+  <label>Nome da Opção (ex: "Chuvoso Aconchegante")</label>
+  <input type="text" id="nome" placeholder="Ex: Intro Chuva, Verso Sexta-feira">
+
+  <div id="campoCategoria" style="display:none;">
+    <label>Categoria</label>
+    <select id="categoria">
+      <option value="">Selecione uma categoria</option>
+    </select>
+    <div class="hint">
+      A categoria define quando este conteúdo poderá ser selecionado automaticamente.
+    </div>
+  </div>
 
     <label id="labelTexto">Texto / Letra</label>
     <textarea id="conteudo" placeholder="Escreva aqui... Use {NOME} onde quiser que o nome do passageiro apareça."></textarea>
@@ -93,15 +103,43 @@
       carregarLista();
     }));
 
-    function atualizarFormulario() {
+    async function atualizarFormulario() {
       const labelTexto = document.getElementById('labelTexto');
       const conteudo = document.getElementById('conteudo');
+      const campoCategoria = document.getElementById('campoCategoria');
+      const categoria = document.getElementById('categoria');
+
       if (isEstilo) {
         labelTexto.innerText = 'Prompt Musical (Descrição em inglês para a IA)';
         conteudo.placeholder = 'Ex: brazilian sertanejo, acoustic guitar, emotional vocals';
       } else {
         labelTexto.innerText = 'Texto / Letra (Roteiro)';
         conteudo.placeholder = '[Intro - Spoken: slow-paced, soft delivery] Ei {NOME}, o dia tá lindo...\n\n[Verse]\nAproveita a viagem, {NOME}...';
+      }
+
+      try {
+        const res = await fetch(`/api/categorias/${tipoAtual}`);
+        const categorias = await res.json();
+
+        categoria.innerHTML = '<option value="">Selecione uma categoria</option>';
+
+        if (Array.isArray(categorias) && categorias.length > 0) {
+          categorias.forEach(nomeCategoria => {
+            const option = document.createElement('option');
+            option.value = nomeCategoria;
+            option.textContent = nomeCategoria;
+            categoria.appendChild(option);
+          });
+
+          campoCategoria.style.display = 'block';
+        } else {
+          campoCategoria.style.display = 'none';
+          categoria.value = '';
+        }
+      } catch (error) {
+        campoCategoria.style.display = 'none';
+        categoria.value = '';
+        console.error('Erro ao carregar categorias:', error);
       }
     }
 
@@ -119,13 +157,17 @@
         lista.innerHTML = data.map(item => {
           const coluna = isEstilo ? 'prompt' : (item.letra ? 'letra' : 'texto');
           const preview = (item[coluna] || '').substring(0, 80);
+          const categoriaTexto = item.categoria
+  ? `<div class="preview">Categoria: ${escapeHtml(item.categoria)}</div>`
+  : '';
           return `<div class="item-row">
             <div class="info">
               <div class="name">${escapeHtml(item.name)}</div>
+              ${categoriaTexto}
               <div class="preview">${escapeHtml(preview)}${preview.length >= 80 ? '...' : ''}</div>
-            </div>
+              </div>
             <div class="actions">
-              <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}')">✏️ Editar</button>
+              <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}','${escapeAttr(item.categoria || '')}')">✏️ Editar</button>
               <button class="danger" onclick="excluirItem('${item.id}','${escapeAttr(item.name)}')">🗑️ Excluir</button>
             </div>
           </div>`;
@@ -135,10 +177,11 @@
       }
     }
 
-    function editarItem(id, nome, conteudo) {
+    function editarItem(id, nome, conteudo, categoriaAtual) {
       document.getElementById('editId').value = id;
       document.getElementById('nome').value = unescapeAttr(nome);
       document.getElementById('conteudo').value = unescapeAttr(conteudo);
+      document.getElementById('categoria').value = unescapeAttr(categoriaAtual);
       document.getElementById('formTitle').innerText = '✏️ Editando Item';
       document.getElementById('btnCancelar').style.display = 'block';
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -148,6 +191,7 @@
       document.getElementById('editId').value = '';
       document.getElementById('nome').value = '';
       document.getElementById('conteudo').value = '';
+      document.getElementById('categoria').value = '';
       document.getElementById('formTitle').innerText = 'Adicionar Novo';
       document.getElementById('btnCancelar').style.display = 'none';
     }
@@ -156,6 +200,7 @@
       const id = document.getElementById('editId').value;
       const nome = document.getElementById('nome').value.trim();
       const conteudo = document.getElementById('conteudo').value.trim();
+      const categoria = document.getElementById('categoria').value || null;
       const msg = document.getElementById('msg');
 
       if (!nome || !conteudo) {
@@ -170,7 +215,9 @@
       try {
         const url = id ? `/api/admin/update/${tipoAtual}/${id}` : '/api/admin/add';
         const method = id ? 'PUT' : 'POST';
-        const body = id ? { nome, conteudo } : { tipo: tipoAtual, nome, conteudo };
+        const body = id
+  ? { nome, conteudo, categoria }
+  : { tipo: tipoAtual, nome, conteudo, categoria };
 
         const res = await fetch(url, {
           method,
