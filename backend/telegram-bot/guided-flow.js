@@ -1,4 +1,7 @@
-import { applicableCatalogItems } from '../music-preparation/catalog-selector.js';
+import {
+  applicableCatalogItems,
+  selectCatalogItem,
+} from '../music-preparation/catalog-selector.js';
 import { callbackDataBytes, parseMusicCommand } from './parsers.js';
 import { normalizePassengerName } from '../music-preparation/validation.js';
 
@@ -122,8 +125,32 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
         }
         const location = await repository.getLocation?.(ids.userId, ids.chatId) ?? null; const current = location ? await weatherService?.current?.(location) ?? null : null;
         if (current) {
-          const matching = (await climates()).filter((item) => item.categoria === current.category);
-          if (matching[0]) { await prepare(state, update, ids, style, matching[0], { summary: current.summary, provider: 'open-meteo' }); return true; }
+          const matching = (await climates()).filter(
+            (item) => item.categoria === current.category,
+          );
+
+          if (matching.length) {
+            const climate = selectCatalogItem({
+              items: matching,
+              telegramUpdateId: update.update_id,
+              catalogType: 'climate',
+              category: current.category,
+            });
+
+            await prepare(
+              state,
+              update,
+              ids,
+              style,
+              climate,
+              {
+                summary: current.summary,
+                provider: 'open-meteo',
+              },
+            );
+
+            return true;
+          }
         }
         await fallback(ids.chatId, update.update_id, state.original.update_id); return true;
       }
