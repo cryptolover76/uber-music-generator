@@ -87,6 +87,46 @@ export function createTelegramRepository({ client }) {
       const { data, error } = await client.from('telegram_daily_usage').select('confirmed_creations_count,estimated_credits_consumed').eq('telegram_user_id', userId).eq('usage_date', date).limit(1);
       if (error) throw fail('status', error); return data?.[0] ?? { confirmed_creations_count: 0, estimated_credits_consumed: 0 };
     },
+    async getCreditStatus(userId, chatId) {
+      const { data, error } = await client.rpc(
+        'get_telegram_credit_status',
+        {
+          p_telegram_user_id: userId,
+          p_telegram_chat_id: chatId,
+        },
+      );
+
+      if (error) throw fail('get_telegram_credit_status', error);
+
+      if (!Array.isArray(data) || data.length > 1) {
+        throw fail(
+          'get_telegram_credit_status',
+          new TypeError('Credit status RPC returned an invalid result'),
+        );
+      }
+
+      return data[0] ?? null;
+    },
+    updateCreditBalance: (
+      userId,
+      chatId,
+      availableCredits,
+      {
+        planCredits = 2500,
+        estimatedCreditCost = 10,
+        reserveCredits = 100,
+        renewalDay = 1,
+      } = {},
+    ) =>
+      rpcOne(client, 'update_telegram_credit_control', {
+        p_telegram_user_id: userId,
+        p_telegram_chat_id: chatId,
+        p_available_credits: availableCredits,
+        p_plan_credits: planCredits,
+        p_estimated_credit_cost: estimatedCreditCost,
+        p_reserve_credits: reserveCredits,
+        p_renewal_day: renewalDay,
+      }),
     async cancelPending(userId, chatId) {
       const { data: rows, error } = await client.from('music_requests').select('id').eq('telegram_user_id', userId).eq('telegram_chat_id', chatId).eq('status', 'prepared').gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false }).limit(1);
       if (error) throw fail('cancelLookup', error); if (!rows?.[0]) return false;

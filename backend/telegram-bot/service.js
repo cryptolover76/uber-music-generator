@@ -6,11 +6,89 @@ import { createGuidedMusicFlow } from './guided-flow.js';
 
 const HELP = 'Envie /musica Nome\nExemplo: /musica Maria da Silva\nEscolha gênero e ritmo, confirme, crie no Suno e cole aqui o link HTTPS.\n/status mostra o uso; /cancelar cancela a interação pendente.';
 const SUNO_CREATE_URL = 'https://suno.com/create';
-const MENU_LABELS = Object.freeze({ newMusic: '🎵 Nova música', status: '📊 Status', location: '📍 Localização', cancel: '❌ Cancelar' });
-const MENU = Object.freeze({ keyboard: [[{ text: MENU_LABELS.newMusic }, { text: MENU_LABELS.status }], [{ text: MENU_LABELS.location }, { text: MENU_LABELS.cancel }]], resize_keyboard: true, is_persistent: true });
+const MENU_LABELS = Object.freeze({
+  newMusic: '🎵 Nova música',
+  status: '📊 Status',
+  credits: '💳 Créditos',
+  location: '📍 Localização',
+  cancel: '❌ Cancelar',
+});
+const MENU = Object.freeze({
+  keyboard: [
+    [{ text: MENU_LABELS.newMusic }, { text: MENU_LABELS.status }],
+    [{ text: MENU_LABELS.credits }, { text: MENU_LABELS.location }],
+    [{ text: MENU_LABELS.cancel }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+});
 const LOCATION_KEYBOARD = Object.freeze({ keyboard: [[{ text: '📍 Ativar clima automático', request_location: true }]], resize_keyboard: true, is_persistent: true });
 function identity(update) { const source = update.message ?? update.callback_query?.message; const from = update.message?.from ?? update.callback_query?.from; return { chatId: source?.chat?.id, chatType: source?.chat?.type, userId: from?.id }; }
 function localDate(clock) { return getLocalContext(clock(), 'America/Sao_Paulo').localDate; }
+
+function creditCycleStatus(clock, renewalDay, songsAvailable) {
+  const [year, month, day] = localDate(clock).split('-').map(Number);
+
+  const daysInCurrentMonth = new Date(
+    Date.UTC(year, month, 0),
+  ).getUTCDate();
+
+  let renewalYear = year;
+  let renewalMonth = month;
+  let effectiveRenewalDay = Math.min(
+    renewalDay,
+    daysInCurrentMonth,
+  );
+
+  let renewalDate = new Date(
+    Date.UTC(renewalYear, renewalMonth - 1, effectiveRenewalDay),
+  );
+
+  const today = new Date(Date.UTC(year, month - 1, day));
+
+  if (renewalDate <= today) {
+    renewalMonth += 1;
+
+    if (renewalMonth > 12) {
+      renewalMonth = 1;
+      renewalYear += 1;
+    }
+
+    const daysInNextMonth = new Date(
+      Date.UTC(renewalYear, renewalMonth, 0),
+    ).getUTCDate();
+
+    effectiveRenewalDay = Math.min(
+      renewalDay,
+      daysInNextMonth,
+    );
+
+    renewalDate = new Date(
+      Date.UTC(
+        renewalYear,
+        renewalMonth - 1,
+        effectiveRenewalDay,
+      ),
+    );
+  }
+
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const daysRemaining = Math.max(
+    1,
+    Math.ceil((renewalDate - today) / millisecondsPerDay),
+  );
+
+  const recommendedToday = Math.max(
+    0,
+    Math.ceil(songsAvailable / daysRemaining),
+  );
+
+  return {
+    daysRemaining,
+    recommendedToday,
+    effectiveRenewalDay,
+  };
+}
 
 export function createTelegramBotService({ api, repository, preparationService, styleCatalog, prepareWithStyle, weatherService, allowedUserId, dailyLimit = 8, creditCost = 10, clock = () => new Date() }) {
   if (!api || !repository || !preparationService) throw new TypeError('Bot dependencies are required');
@@ -77,6 +155,38 @@ export function createTelegramBotService({ api, repository, preparationService, 
     const usage = await repository.status(ids.userId, localDate(clock)); const count = usage.confirmed_creations_count ?? 0;
     return send(ids.chatId, `Uso de hoje: ${count}/${dailyLimit} criações. Saldo diário estimado: ${dailyLimit - count}. Créditos estimados consumidos: ${usage.estimated_credits_consumed ?? count * creditCost}.`, { reply_markup: MENU });
   }
+  async function showCredits(ids) {
+    const credit = await repository.getCreditStatus(ids.userId, ids.chatId);
+    if (!credit) {
+      return send(
+        ids.chatId,
+        '💳 Controle de créditos ainda não configurado.\n\n' +
+          'Envie o saldo atual mostrado no Suno assim:\n\n' +
+          '/creditos 2500',
+        { reply_markup: MENU },
+      );
+    }
+    const cycle = creditCycleStatus(
+      clock,
+      credit.renewal_day,
+      credit.estimated_songs_available,
+    );
+
+    return send(
+      ids.chatId,
+      `💳 Créditos Suno\n\n` +
+        `Saldo atual: ${credit.available_credits}\n` +
+        `Reserva de segurança: ${credit.reserve_credits}\n` +
+        `Créditos utilizáveis: ${credit.usable_credits}\n` +
+        `Custo estimado por música: ${credit.estimated_credit_cost}\n` +
+        `Músicas disponíveis: ${credit.estimated_songs_available}\n` +
+        `Renovação: dia ${String(cycle.effectiveRenewalDay).padStart(2, '0')}\n` +
+        `Dias restantes: ${cycle.daysRemaining}\n` +
+        `Sugestão para hoje: ${cycle.recommendedToday} músicas\n\n` +
+        `Para atualizar, envie:\n/creditos NOVO_SALDO`,
+      { reply_markup: MENU },
+    );
+  }
   async function cancelInteraction(ids) {
     const guidedCancelled = await guided.cancel(ids);
     const cancelled = guidedCancelled || await repository.cancelPending(ids.userId, ids.chatId);
@@ -109,6 +219,60 @@ export function createTelegramBotService({ api, repository, preparationService, 
       return;
     }
     if (command === 'status' || text === MENU_LABELS.status) return showStatus(ids);
+    if (command === 'creditos') {
+      const match = text.match(
+        /^\/creditos(?:@[A-Za-z0-9_]+)?(?:\s+(\d+))?\s*$/u,
+      );
+
+      if (!match?.[1]) {
+        return showCredits(ids);
+      }
+
+      const availableCredits = Number(match[1]);
+
+      if (
+        !Number.isSafeInteger(availableCredits) ||
+        availableCredits < 0 ||
+        availableCredits > 100000
+      ) {
+        return send(
+          ids.chatId,
+          'Saldo inválido. Envie somente um número inteiro.\n\n' +
+            'Exemplo:\n/creditos 1840',
+          { reply_markup: MENU },
+        );
+      }
+
+      const current = await repository.getCreditStatus(
+        ids.userId,
+        ids.chatId,
+      );
+
+      await repository.updateCreditBalance(
+        ids.userId,
+        ids.chatId,
+        availableCredits,
+        current
+          ? {
+              planCredits: current.plan_credits,
+              estimatedCreditCost: current.estimated_credit_cost,
+              reserveCredits: current.reserve_credits,
+              renewalDay: current.renewal_day,
+            }
+          : {
+              planCredits: 2500,
+              estimatedCreditCost: creditCost,
+              reserveCredits: 100,
+              renewalDay: 1,
+            },
+      );
+
+      return showCredits(ids);
+    }
+
+    if (text === MENU_LABELS.credits) {
+      return showCredits(ids);
+    }
     if (command === 'cancelar' || text === MENU_LABELS.cancel) return cancelInteraction(ids);
     if (text === MENU_LABELS.location) return requestLocation(ids.chatId, false);
     if (text === MENU_LABELS.newMusic) {

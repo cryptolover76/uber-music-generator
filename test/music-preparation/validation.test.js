@@ -33,9 +33,38 @@ test('valida bigint sem conversão insegura e os sinais de IDs Telegram', () => 
 });
 
 test('valida UUIDs e regras dos modos manual e automático', () => {
-  assert.throws(() => validateMusicPreparationInput({ ...valid, template_id: 'not-uuid' }), /template_id/);
-  assert.throws(() => validateMusicPreparationInput({ ...valid, style_id: undefined }), /style_id/);
-  assert.throws(() => validateMusicPreparationInput({ ...valid, selection_mode: 'automatic' }), (error) => error.code === 'AUTOMATIC_MODE_REJECTS_MANUAL_IDS');
-  const automatic = validateMusicPreparationInput({ update_id: '1', user_id: '2', chat_id: '-3', name: 'João', gender: 'm', selection_mode: 'automatic' });
+  assert.throws(
+    () => validateMusicPreparationInput({ ...valid, template_id: 'not-uuid' }),
+    /template_id/,
+  );
+
+  assert.throws(
+    () => validateMusicPreparationInput({ ...valid, style_id: undefined }),
+    /style_id/,
+  );
+
+  assert.throws(
+    () =>
+      validateMusicPreparationInput({
+        ...valid,
+        selection_mode: 'automatic',
+      }),
+    (error) => error.code === 'AUTOMATIC_MODE_REJECTS_TEMPLATE_ID',
+  );
+
+  const automatic = validateMusicPreparationInput({
+    update_id: '1',
+    user_id: '2',
+    chat_id: '-3',
+    name: 'João',
+    gender: 'm',
+    selection_mode: 'automatic',
+    style_id: '00000000-0000-4000-8000-000000000002',
+  });
+
   assert.equal(automatic.template_id, null);
+  assert.equal(
+    automatic.style_id,
+    '00000000-0000-4000-8000-000000000002',
+  );
 });

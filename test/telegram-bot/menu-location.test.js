@@ -17,7 +17,7 @@ function setup({ savedLocation = null, recent = [] } = {}) {
 test('/start mantém menu persistente e solicita localização apenas quando ausente', async () => {
   const first = setup(); await first.bot.processUpdate(msg(1, '/start'));
   const menu = first.sent[0].options.reply_markup; assert.equal(menu.resize_keyboard, true); assert.equal(menu.is_persistent, true);
-  assert.deepEqual(menu.keyboard.flat().map((button) => button.text), ['🎵 Nova música', '📊 Status', '📍 Localização', '❌ Cancelar']);
+  assert.deepEqual(menu.keyboard.flat().map((button) => button.text), ['🎵 Nova música', '📊 Status', '💳 Créditos', '📍 Localização', '❌ Cancelar']);
   assert.equal(first.sent[1].options.reply_markup.keyboard[0][0].request_location, true);
   const returning = setup({ savedLocation: { latitude: 1, longitude: 2 } }); await returning.bot.processUpdate(msg(2, '/start')); assert.equal(returning.sent.length, 1);
 });

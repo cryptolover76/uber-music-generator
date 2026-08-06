@@ -83,8 +83,8 @@ export function validateMusicPreparationInput(input) {
   if (mode !== 'manual' && mode !== 'automatic') invalid('selection_mode', 'must be manual or automatic');
   const rawTemplateId = input.template_id ?? input.templateId;
   const rawStyleId = input.style_id ?? input.styleId;
-  if (mode === 'automatic' && (rawTemplateId != null || rawStyleId != null)) {
-    throw new MusicPreparationValidationError('AUTOMATIC_MODE_REJECTS_MANUAL_IDS', 'automatic mode does not accept template_id or style_id');
+  if (mode === 'automatic' && rawTemplateId != null) {
+    throw new MusicPreparationValidationError('AUTOMATIC_MODE_REJECTS_TEMPLATE_ID', 'automatic mode does not accept template_id');
   }
 
   return Object.freeze({
@@ -96,6 +96,8 @@ export function validateMusicPreparationInput(input) {
     selection_mode: mode,
     template_id: normalizeUuid(rawTemplateId, 'template_id', { required: mode === 'manual' }),
     style_id: normalizeUuid(rawStyleId, 'style_id', { required: mode === 'manual' }),
+    period_id: normalizeUuid(input.period_id ?? input.periodId, 'period_id'),
+    weekday_id: normalizeUuid(input.weekday_id ?? input.weekdayId, 'weekday_id'),
     climate_id: normalizeUuid(input.climate_id ?? input.climateId, 'climate_id'),
     weather_status: (input.climate_id ?? input.climateId) ? 'applied' : 'not_requested',
     weather_summary: typeof input.weather_summary === 'string' && input.weather_summary.trim() ? input.weather_summary.trim().slice(0, 500) : null,

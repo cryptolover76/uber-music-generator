@@ -31,8 +31,10 @@ function sameRequest(existing, input) {
     existing.passenger_name === input.passenger_name &&
     existing.passenger_gender === input.passenger_gender &&
     existing.selection_mode === input.selection_mode &&
-    (input.selection_mode !== 'manual' ||
-      (existing.template_id === input.template_id && existing.style_id === input.style_id)) &&
+    (!input.template_id || existing.template_id === input.template_id) &&
+    (!input.style_id || existing.style_id === input.style_id) &&
+    (!input.period_id || existing.period_id === input.period_id) &&
+    (!input.weekday_id || existing.weekday_id === input.weekday_id) &&
     existing.climate_id === input.climate_id;
 }
 
@@ -116,52 +118,35 @@ export function createMusicPreparationService({
       const now = nowFrom(clock);
       const context = getLocalContext(now, timezone);
       let template;
-      let style;
-      if (input.selection_mode === 'manual') {
-        [template, style] = await Promise.all([
-          findCatalog(catalogRepository, 'template', input.template_id),
-          findCatalog(catalogRepository, 'style', input.style_id),
-        ]);
-        template = ensureManualItem(template, 'template', input.template_id);
-        style = ensureManualItem(style, 'style', input.style_id);
-      } else {
-        const [templates, styles] = await Promise.all([
-          listCatalog(catalogRepository, 'template'),
-          listCatalog(catalogRepository, 'style'),
-        ]);
+      if (input.template_id) template = ensureManualItem(await findCatalog(catalogRepository, 'template', input.template_id), 'template', input.template_id);
+      else {
+        const templates = await listCatalog(catalogRepository, 'template');
         template = select(catalogSelector, { items: templates, telegramUpdateId: input.telegram_update_id, catalogType: 'template' });
+      }
+      let style;
+      if (input.style_id) style = ensureManualItem(await findCatalog(catalogRepository, 'style', input.style_id), 'style', input.style_id);
+      else {
+        const styles = await listCatalog(catalogRepository, 'style');
         style = select(catalogSelector, { items: styles, telegramUpdateId: input.telegram_update_id, catalogType: 'style' });
       }
 
-      const periods = await listCatalog(catalogRepository, 'period');
-      const periodo = select(catalogSelector, {
-        items: periods,
-        telegramUpdateId: input.telegram_update_id,
-        catalogType: 'period',
-        category: context.periodCategory,
-      });
-      const weekdays = await listCatalog(catalogRepository, 'weekday');
-      let weekdayCandidates = weekdays;
-      let weekdayCategory = context.weekdayCategory;
-      if (context.isWeekend) {
-        try {
-          select(catalogSelector, {
-            items: weekdays,
-            telegramUpdateId: input.telegram_update_id,
-            catalogType: 'weekday',
-            category: weekdayCategory,
-          });
-        } catch (error) {
-          if (!(error instanceof CatalogSelectionError)) throw error;
-          weekdayCategory = 'Fim de semana';
-        }
+      let periodo;
+      if (input.period_id) periodo = ensureManualItem(await findCatalog(catalogRepository, 'period', input.period_id), 'period', input.period_id);
+      else {
+        const periods = await listCatalog(catalogRepository, 'period');
+        periodo = select(catalogSelector, { items: periods, telegramUpdateId: input.telegram_update_id, catalogType: 'period', category: context.periodCategory });
       }
-      const dia = select(catalogSelector, {
-        items: weekdayCandidates,
-        telegramUpdateId: input.telegram_update_id,
-        catalogType: 'weekday',
-        category: weekdayCategory,
-      });
+      let dia;
+      if (input.weekday_id) dia = ensureManualItem(await findCatalog(catalogRepository, 'weekday', input.weekday_id), 'weekday', input.weekday_id);
+      else {
+        const weekdays = await listCatalog(catalogRepository, 'weekday');
+        let weekdayCategory = context.weekdayCategory;
+        if (context.isWeekend) {
+          try { select(catalogSelector, { items: weekdays, telegramUpdateId: input.telegram_update_id, catalogType: 'weekday', category: weekdayCategory }); }
+          catch (error) { if (!(error instanceof CatalogSelectionError)) throw error; weekdayCategory = 'Fim de semana'; }
+        }
+        dia = select(catalogSelector, { items: weekdays, telegramUpdateId: input.telegram_update_id, catalogType: 'weekday', category: weekdayCategory });
+      }
 
       let clima = null;
       if (input.climate_id) {
@@ -228,28 +213,14 @@ export function createMusicPreparationService({
   });
 }
 
-export async function prepareMusicRequestWithStyle({
-  preparationService,
-  catalogRepository,
-  catalogSelector = defaultCatalogSelector,
-}, rawInput, styleId) {
+export async function prepareMusicRequestWithStyle({ preparationService, catalogRepository }, rawInput, styleId) {
   if (typeof preparationService?.prepare !== 'function') throw new TypeError('preparationService.prepare is required');
   validateCatalogRepository(catalogRepository);
-  const input = validateMusicPreparationInput({ ...rawInput, selection_mode: 'automatic' });
-  const [templates, style] = await Promise.all([
-    listCatalog(catalogRepository, 'template'),
-    findCatalog(catalogRepository, 'style', styleId),
-  ]);
-  const template = select(catalogSelector, {
-    items: templates,
-    telegramUpdateId: input.telegram_update_id,
-    catalogType: 'template',
-  });
-  const validatedStyle = ensureManualItem(style, 'style', styleId);
-  return preparationService.prepare({
-    ...rawInput,
-    selection_mode: 'manual',
-    template_id: template.id,
-    style_id: validatedStyle.id,
-  });
+  const style = ensureManualItem(await findCatalog(catalogRepository, 'style', styleId), 'style', styleId);
+  return preparationService.prepare({ ...rawInput, selection_mode: 'automatic', style_id: style.id });
+}
+
+export async function prepareCustomizedMusicRequest({ preparationService }, rawInput, selections) {
+  if (typeof preparationService?.prepare !== 'function') throw new TypeError('preparationService.prepare is required');
+  return preparationService.prepare({ ...rawInput, selection_mode: 'manual', template_id: selections.templateId, style_id: selections.styleId, climate_id: selections.climateId, period_id: selections.periodId, weekday_id: selections.weekdayId, weather_status: 'applied', weather_summary: selections.weatherSummary, weather_provider: null });
 }
