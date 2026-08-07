@@ -19,7 +19,29 @@ function harness() {
     async cancelPending() { return false; }, async getLocation() { return { latitude: -27.5, longitude: -48.5 }; },
   };
   const api = { async sendMessage(_chat, text, options) { sent.push({ text, options }); }, async answerCallbackQuery(_id, options = {}) { answers.push(options); } };
-  const styleCatalog = { async list(type) { return type === 'styles' ? [style] : []; }, async findById() { return style; } };
+  const styleCatalog = {
+    async list(type) {
+      if (type === 'styles') return [style];
+
+      if (type === 'templates') {
+        return [{
+          id: '10000000-0000-4000-8000-000000000001',
+          name: 'Template Normal',
+          letra: 'Olá {NOME}',
+          active: true,
+          categoria: null,
+          tema: 'Normal',
+          grupo: 1,
+        }];
+      }
+
+      return [];
+    },
+
+    async findById() {
+      return style;
+    },
+  };
   const bot = createTelegramBotService({ api, repository, preparationService: { async prepare() {} }, styleCatalog, prepareWithStyle: async () => {}, weatherService: { async current() { return null; } }, allowedUserId: 10 });
   return { bot, rows, sent, answers };
 }

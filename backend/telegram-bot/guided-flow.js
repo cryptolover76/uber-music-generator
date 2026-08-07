@@ -34,10 +34,11 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
   async function originalFromGender(genderUpdateId, ids) {
     const genderRow = await repository.getGuidedUpdate(genderUpdateId);
     if (!genderRow || !owner(genderRow.payload, ids)) return null;
-    const match = String(genderRow.payload?.callback_query?.data || '').match(/^g:(\d+):([MFN])$/u);
+    const match = String(genderRow.payload?.callback_query?.data || '').match(/^g:(\d+):([MFN])(?::(.+))?$/u);
     if (!match) return null;
     const original = await repository.getGuidedUpdate(match[1]); const command = commandFrom(original, ids);
-    return command ? { original, command, gender: match[2], genderRow } : null;
+    const theme = match[3] ? decodeURIComponent(match[3]) : null;
+    return command ? { original, command, gender: match[2], theme, genderRow } : null;
   }
   async function stateFromStyle(styleUpdateId, ids) {
     const styleRow = await repository.getGuidedUpdate(styleUpdateId);
@@ -47,10 +48,104 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
     const state = await originalFromGender(match[1], ids);
     return state ? { ...state, styleId: match[2], styleRow } : null;
   }
+  async function themes() {
+    if (typeof styleCatalog?.list !== 'function') {
+      return ['Normal'];
+    }
+
+    const rows = await styleCatalog.list('templates');
+    return [...new Set(
+      rows
+        .filter((item) => item?.active === true)
+        .map((item) =>
+          typeof item.tema === 'string' && item.tema.trim()
+            ? item.tema.trim()
+            : 'Normal'
+        )
+    )].sort((a, b) => {
+      if (a === 'Normal' && b !== 'Normal') return -1;
+      if (b === 'Normal' && a !== 'Normal') return 1;
+
+      return a.localeCompare(
+        b,
+        'pt-BR',
+        { sensitivity: 'base' },
+      );
+    });
+  }
+
+  async function showThemes(chatId, originId, passengerName) {
+    const items = await themes();
+
+    if (!items.length) {
+      await send(chatId, 'Não há temas ativos no momento.');
+      return;
+    }
+
+    if (
+      items.length === 1
+      && items[0] === 'Normal'
+    ) {
+      await send(
+        chatId,
+        `Nome: ${passengerName}\nEscolha o gênero:`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                button('Masculino (M)', `g:${originId}:M`),
+                button('Feminino (F)', `g:${originId}:F`),
+              ],
+              [
+                button('Neutro (N)', `g:${originId}:N`),
+                button('Cancelar', `x:${originId}`),
+              ],
+            ],
+          },
+        },
+      );
+
+      return;
+    }
+
+    const rows = items.map((theme) => [
+      button(theme, `t:${originId}:${encodeURIComponent(theme)}`)
+    ]);
+
+    rows.push([button('Cancelar', `x:${originId}`)]);
+
+    await send(
+      chatId,
+      `Nome: ${passengerName}\nEscolha o tema:`,
+      { reply_markup: { inline_keyboard: rows } },
+    );
+  }
+
   async function styles() { return sortedCatalog(await styleCatalog.list('styles'), 'style'); }
-  async function climates() {
+  async function climates(theme = 'Normal') {
     const rows = await styleCatalog.list('climates');
-    return applicableCatalogItems(rows.filter((item) => item.categoria != null && CLIMATE_ICONS[item.categoria]), { catalogType: 'climate' }).sort((a, b) => CLIMATE_ORDER[a.categoria] - CLIMATE_ORDER[b.categoria] || a.id.localeCompare(b.id));
+
+    const themed = rows.filter((item) => {
+      const itemTheme =
+        typeof item.tema === 'string' && item.tema.trim()
+          ? item.tema.trim()
+          : 'Normal';
+
+      return (
+        itemTheme === theme
+        && item.categoria != null
+        && CLIMATE_ICONS[item.categoria]
+      );
+    });
+
+    return applicableCatalogItems(
+      themed,
+      { catalogType: 'climate' },
+    ).sort(
+      (a, b) =>
+        CLIMATE_ORDER[a.categoria] - CLIMATE_ORDER[b.categoria]
+        || a.id.localeCompare(b.id),
+    );
   }
   async function showStyles(chatId, genderUpdateId, originId, page) {
     const items = await styles();
@@ -64,8 +159,8 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
     rows.push([button('Cancelar', `x:${originId}`)]);
     await send(chatId, `Escolha o ritmo (${safePage + 1}/${pages}):`, { reply_markup: { inline_keyboard: rows } });
   }
-  async function fallback(chatId, styleUpdateId, originId) {
-    const items = await climates();
+  async function fallback(chatId, styleUpdateId, originId, theme = 'Normal') {
+    const items = await climates(theme);
     const rows = items.map((item) => [button(`${CLIMATE_ICONS[item.categoria]} ${item.categoria}`, `c:${styleUpdateId}:${item.id}`)]);
     rows.push([button('❌ Cancelar', `x:${originId}`)]);
     await send(chatId, 'Não consegui verificar o clima. Como está o tempo agora?', { reply_markup: { inline_keyboard: rows } });
@@ -76,7 +171,7 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
     const marker = state.original.last_error === expectedMarker ? expectedMarker : await repository.acquireGuidedFinalization(state.original.update_id, update.update_id);
     if (!marker) { await api.answerCallbackQuery(update.callback_query.id, { text: 'Pedido já processado.' }); return; }
     try {
-      const prepared = await prepareWithStyle({ update_id: update.update_id, user_id: ids.userId, chat_id: ids.chatId, name: state.command.passengerName, gender: state.gender, climate_id: climate.id, weather_status: 'applied', weather_summary: weather.summary, weather_provider: weather.provider }, style.id);
+      const prepared = await prepareWithStyle({ update_id: update.update_id, user_id: ids.userId, chat_id: ids.chatId, name: state.command.passengerName, gender: state.gender, ...(state.theme ? { tema: state.theme } : {}), climate_id: climate.id, weather_status: 'applied', weather_summary: weather.summary, weather_provider: weather.provider }, style.id);
       const request = prepared.request;
       await send(ids.chatId, `Pedido preparado\nNome: ${request.passenger_name}\nGênero: ${GENDERS[request.passenger_gender]}\nTítulo: ${request.title}\nRitmo: ${request.style_name}\nClima: ${climate.categoria}\nPeríodo: ${request.local_period}\nDia: ${request.local_weekday}`, { reply_markup: { inline_keyboard: [[button('Confirmar e criar', `confirm:${request.id}`)]] } });
       const finished = await repository.finishGuidedFinalization(state.original.update_id, marker);
@@ -88,11 +183,65 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
     async start(update, ids, parsed) {
       if (parsed.gender) return false;
       const origin = String(update.update_id);
-      await send(ids.chatId, `Nome: ${parsed.passengerName}\nEscolha o gênero:`, { reply_markup: { inline_keyboard: [[button('Masculino (M)', `g:${origin}:M`), button('Feminino (F)', `g:${origin}:F`)], [button('Neutro (N)', `g:${origin}:N`), button('Cancelar', `x:${origin}`)]] } });
+      await showThemes(ids.chatId, origin, parsed.passengerName);
       return true;
     },
     async callback(update, ids) {
-      const query = update.callback_query; const data = String(query?.data || ''); let match = data.match(/^g:(\d+):([MFN])$/u);
+      const query = update.callback_query; const data = String(query?.data || '');
+
+      let match = data.match(/^t:(\d+):(.+)$/u);
+      if (match) {
+        const original = await repository.getGuidedUpdate(match[1]);
+        const command = commandFrom(original, ids);
+
+        if (!command || terminalState(original)) {
+          await invalid(query);
+          return true;
+        }
+
+        let theme;
+        try {
+          theme = decodeURIComponent(match[2]);
+        } catch {
+          await invalid(query);
+          return true;
+        }
+
+        const availableThemes = await themes();
+
+        if (!availableThemes.includes(theme)) {
+          await invalid(query);
+          return true;
+        }
+
+        const encodedTheme = encodeURIComponent(theme);
+        const origin = match[1];
+
+        await api.answerCallbackQuery(query.id);
+
+        await send(
+          ids.chatId,
+          `Nome: ${command.passengerName}\nTema: ${theme}\nEscolha o gênero:`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  button('Masculino (M)', `g:${origin}:M:${encodedTheme}`),
+                  button('Feminino (F)', `g:${origin}:F:${encodedTheme}`),
+                ],
+                [
+                  button('Neutro (N)', `g:${origin}:N:${encodedTheme}`),
+                  button('Cancelar', `x:${origin}`),
+                ],
+              ],
+            },
+          },
+        );
+
+        return true;
+      }
+
+      match = data.match(/^g:(\d+):([MFN])(?::(.+))?$/u);
       if (match) {
         const original = await repository.getGuidedUpdate(match[1]); const command = commandFrom(original, ids);
         if (!command) { await invalid(query); return true; }
@@ -116,7 +265,7 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
           const marker = await repository.acquireGuidedFinalization(state.original.update_id, update.update_id);
           if (!marker) { await api.answerCallbackQuery(query.id, { text: 'Pedido já processado.' }); return true; }
           try {
-            const prepared = await prepareWithStyle({ update_id: update.update_id, user_id: ids.userId, chat_id: ids.chatId, name: state.command.passengerName, gender: state.gender }, style.id);
+            const prepared = await prepareWithStyle({ update_id: update.update_id, user_id: ids.userId, chat_id: ids.chatId, name: state.command.passengerName, gender: state.gender, ...(state.theme ? { tema: state.theme } : {}) }, style.id);
             const request = prepared.request;
             await send(ids.chatId, `Pedido preparado\nNome: ${request.passenger_name}\nGênero: ${GENDERS[request.passenger_gender]}\nTítulo: ${request.title}\nRitmo: ${request.style_name}\nPeríodo: ${request.local_period}\nDia: ${request.local_weekday}`, { reply_markup: { inline_keyboard: [[button('Confirmar e criar', `confirm:${request.id}`)]] } });
             await repository.finishGuidedFinalization(state.original.update_id, marker);
@@ -125,7 +274,9 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
         }
         const location = await repository.getLocation?.(ids.userId, ids.chatId) ?? null; const current = location ? await weatherService?.current?.(location) ?? null : null;
         if (current) {
-          const matching = (await climates()).filter(
+          const matching = (
+            await climates(state.theme || 'Normal')
+          ).filter(
             (item) => item.categoria === current.category,
           );
 
@@ -152,7 +303,13 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
             return true;
           }
         }
-        await fallback(ids.chatId, update.update_id, state.original.update_id); return true;
+        await fallback(
+          ids.chatId,
+          update.update_id,
+          state.original.update_id,
+          state.theme || 'Normal',
+        );
+        return true;
       }
       match = data.match(/^c:(\d+):([0-9a-f-]{36})$/iu);
       if (match) {
@@ -160,7 +317,19 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
         if (terminalState(state.original)) { await api.answerCallbackQuery(query.id, { text: 'Pedido já processado.' }); return true; }
         const [style, climate] = await Promise.all([styleCatalog.findById('styles', state.styleId), styleCatalog.findById('climates', match[2])]);
         if (!style || !climate || climate.categoria == null || !CLIMATE_ICONS[climate.categoria]) { await invalid(query); return true; }
-        applicableCatalogItems([style], { catalogType: 'style' }); applicableCatalogItems([climate], { catalogType: 'climate' });
+        const selectedTheme = state.theme || 'Normal';
+        const climateTheme =
+          typeof climate.tema === 'string' && climate.tema.trim()
+            ? climate.tema.trim()
+            : 'Normal';
+
+        if (climateTheme !== selectedTheme) {
+          await invalid(query);
+          return true;
+        }
+
+        applicableCatalogItems([style], { catalogType: 'style' });
+        applicableCatalogItems([climate], { catalogType: 'climate' });
         await api.answerCallbackQuery(query.id); await prepare(state, update, ids, style, climate, { summary: climate.categoria, provider: null }); return true;
       }
       match = data.match(/^x:(\d+)$/u);

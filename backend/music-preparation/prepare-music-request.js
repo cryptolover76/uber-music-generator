@@ -127,6 +127,10 @@ export function createMusicPreparationService({
       // precisam pertencer ao mesmo grupo.
       let clima = null;
       let selectedGroup = null;
+      let selectedTheme =
+        typeof rawInput?.tema === 'string' && rawInput.tema.trim()
+          ? rawInput.tema.trim()
+          : 'Normal';
 
       if (input.climate_id) {
         clima = ensureManualItem(
@@ -140,26 +144,48 @@ export function createMusicPreparationService({
         );
       }
 
-  const templates = await listCatalog(
-    catalogRepository,
-    'template',
-  );
+      if (
+        !(typeof rawInput?.tema === 'string' && rawInput.tema.trim())
+        && typeof clima?.tema === 'string'
+        && clima.tema.trim()
+      ) {
+        selectedTheme = clima.tema.trim();
+      }
 
-  selectedGroup =
-    Number.isInteger(clima?.grupo) && clima.grupo > 0
-      ? clima.grupo
-      : detectGroup(templates, {
-          telegramUpdateId: input.telegram_update_id,
-          catalogType: 'template',
+      function itensDoTema(items) {
+        return items.filter((item) => {
+          const temaItem =
+            typeof item.tema === 'string' && item.tema.trim()
+              ? item.tema.trim()
+              : 'Normal';
+
+          return temaItem === selectedTheme;
         });
+      }
 
-  function itensDoGrupo(items) {
-    if (selectedGroup == null) return items;
+      const templatesDoTema = itensDoTema(
+        await listCatalog(catalogRepository, 'template'),
+      );
 
-    return items.filter(
-      (item) => item.grupo === selectedGroup,
-    );
-  }
+      selectedGroup =
+        Number.isInteger(clima?.grupo) && clima.grupo > 0
+          ? clima.grupo
+          : detectGroup(templatesDoTema, {
+              telegramUpdateId: input.telegram_update_id,
+              catalogType: 'template',
+            });
+
+      function itensDoGrupo(items) {
+        const itemsDoTema = itensDoTema(items);
+
+        if (selectedGroup == null) {
+          return itemsDoTema;
+        }
+
+        return itemsDoTema.filter(
+          (item) => item.grupo === selectedGroup,
+        );
+      }
 
       let template;
 

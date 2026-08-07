@@ -18,16 +18,19 @@ export const TIPOS_VALIDOS = {
     colunaConteudo: 'letra',
     categorias: [],
     aceitaGrupoVariacao: true,
+    aceitaTema: true,
   },
   climas: {
     colunaConteudo: 'texto',
     categorias: ['Ensolarado', 'Chuvoso', 'Nublado'],
     aceitaGrupoVariacao: true,
+    aceitaTema: true,
   },
   periodos: {
     colunaConteudo: 'texto',
     categorias: ['Manhã', 'Tarde', 'Fim de tarde', 'Noite'],
     aceitaGrupoVariacao: true,
+    aceitaTema: true,
   },
   dias_semana: {
     colunaConteudo: 'texto',
@@ -43,6 +46,7 @@ export const TIPOS_VALIDOS = {
       'Fim de semana',
     ],
     aceitaGrupoVariacao: true,
+    aceitaTema: true,
   },
   estilos: {
     colunaConteudo: 'prompt',
@@ -61,6 +65,7 @@ export const TIPOS_VALIDOS = {
       'MPB',
     ],
     aceitaGrupoVariacao: false,
+    aceitaTema: false,
   },
 };
 
@@ -90,6 +95,7 @@ export async function insertItem(
   conteudo,
   categoria,
   grupoVariacao,
+  tema,
 ) {
   const config = TIPOS_VALIDOS[table];
   if (!config) throw new Error(`Tipo inválido: ${table}`);
@@ -100,6 +106,10 @@ export async function insertItem(
 
   if (config.aceitaGrupoVariacao) {
     row.grupo = grupoVariacao ?? null;
+  }
+
+  if (config.aceitaTema) {
+    row.tema = tema || 'Normal';
   }
 
   const { data, error } = await supabase
@@ -119,6 +129,7 @@ export async function updateItem(
   conteudo,
   categoria,
   grupoVariacao,
+  tema,
 ) {
   const config = TIPOS_VALIDOS[table];
   if (!config) throw new Error(`Tipo inválido: ${table}`);
@@ -134,6 +145,13 @@ export async function updateItem(
     && grupoVariacao !== undefined
   ) {
     row.grupo = grupoVariacao;
+  }
+
+  if (
+    config.aceitaTema
+    && tema !== undefined
+  ) {
+    row.tema = tema || 'Normal';
   }
 
   const { data, error } = await supabase
