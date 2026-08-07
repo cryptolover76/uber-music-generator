@@ -54,7 +54,7 @@ test('findById uses actual migration columns and active filter', async () => {
   assert.equal(await repository.findById('templates', 'one'), row);
   assert.deepEqual(fake.calls, [
     ['from', 'templates_letras'],
-    ['select', 'id,name,letra,active,categoria'],
+    ['select', 'id,name,letra,active,categoria,tema,grupo'],
     ['eq', 'active', true],
     ['eq', 'id', 'one'],
   ]);
@@ -78,12 +78,12 @@ test('public catalog repository interface is exactly list and findById', () => {
 
 test('every catalog list uses its migration table, explicit columns and active filter', async () => {
   const cases = [
-    ['templates', 'templates_letras', 'id,name,letra,active,categoria'],
+    ['templates', 'templates_letras', 'id,name,letra,active,categoria,tema,grupo'],
     ['styles', 'estilos', 'id,name,prompt,active,categoria'],
-    ['periods', 'periodos', 'id,name,texto,active,categoria'],
-    ['weekdays', 'dias_semana', 'id,name,texto,active,categoria'],
+    ['periods', 'periodos', 'id,name,texto,active,categoria,tema,grupo'],
+    ['weekdays', 'dias_semana', 'id,name,texto,active,categoria,tema,grupo'],
+    ['climates', 'climas', 'id,name,texto,active,categoria,tema,grupo'],
   ];
-
   for (const [type, table, columns] of cases) {
     const fake = fakeClient({ data: [], error: null });
     const repository = createSupabaseCatalogRepository({ client: fake.client });

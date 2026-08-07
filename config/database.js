@@ -14,11 +14,54 @@ if (!supabaseUrl || !supabaseKey) {
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const TIPOS_VALIDOS = {
-  templates_letras: { colunaConteudo: 'letra', categorias: [] },
-  climas: { colunaConteudo: 'texto', categorias: ['Ensolarado', 'Chuvoso', 'Nublado'] },
-  periodos: { colunaConteudo: 'texto', categorias: ['Manhã', 'Tarde', 'Fim de tarde', 'Noite'] },
-  dias_semana: { colunaConteudo: 'texto', categorias: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo', 'Feriado', 'Fim de semana'] },
-  estilos: { colunaConteudo: 'prompt', categorias: ['Moda de viola', 'Rock 80', 'Rock 90', 'Pagode', 'Sertanejo universitário', 'Forró', 'Funk', 'Samba', 'Axé', 'Sertanejo', 'Pop', 'MPB'] },
+  templates_letras: {
+    colunaConteudo: 'letra',
+    categorias: [],
+    aceitaGrupoVariacao: true,
+  },
+  climas: {
+    colunaConteudo: 'texto',
+    categorias: ['Ensolarado', 'Chuvoso', 'Nublado'],
+    aceitaGrupoVariacao: true,
+  },
+  periodos: {
+    colunaConteudo: 'texto',
+    categorias: ['Manhã', 'Tarde', 'Fim de tarde', 'Noite'],
+    aceitaGrupoVariacao: true,
+  },
+  dias_semana: {
+    colunaConteudo: 'texto',
+    categorias: [
+      'Segunda',
+      'Terça',
+      'Quarta',
+      'Quinta',
+      'Sexta',
+      'Sábado',
+      'Domingo',
+      'Feriado',
+      'Fim de semana',
+    ],
+    aceitaGrupoVariacao: true,
+  },
+  estilos: {
+    colunaConteudo: 'prompt',
+    categorias: [
+      'Moda de viola',
+      'Rock 80',
+      'Rock 90',
+      'Pagode',
+      'Sertanejo universitário',
+      'Forró',
+      'Funk',
+      'Samba',
+      'Axé',
+      'Sertanejo',
+      'Pop',
+      'MPB',
+    ],
+    aceitaGrupoVariacao: false,
+  },
 };
 
 export async function getAll(table) {
@@ -41,12 +84,23 @@ export async function getById(table, id) {
   return data;
 }
 
-export async function insertItem(table, nome, conteudo, categoria) {
+export async function insertItem(
+  table,
+  nome,
+  conteudo,
+  categoria,
+  grupoVariacao,
+) {
   const config = TIPOS_VALIDOS[table];
   if (!config) throw new Error(`Tipo inválido: ${table}`);
 
   const row = { name: nome, [config.colunaConteudo]: conteudo };
+
   if (categoria) row.categoria = categoria;
+
+  if (config.aceitaGrupoVariacao) {
+    row.grupo = grupoVariacao ?? null;
+  }
 
   const { data, error } = await supabase
     .from(table)
@@ -57,12 +111,30 @@ export async function insertItem(table, nome, conteudo, categoria) {
   return data;
 }
 
-export async function updateItem(table, id, nome, conteudo, categoria) {
+
+export async function updateItem(
+  table,
+  id,
+  nome,
+  conteudo,
+  categoria,
+  grupoVariacao,
+) {
   const config = TIPOS_VALIDOS[table];
   if (!config) throw new Error(`Tipo inválido: ${table}`);
 
   const row = { name: nome, [config.colunaConteudo]: conteudo };
-  if (categoria !== undefined) row.categoria = categoria || null;
+
+  if (categoria !== undefined) {
+    row.categoria = categoria || null;
+  }
+
+  if (
+    config.aceitaGrupoVariacao
+    && grupoVariacao !== undefined
+  ) {
+    row.grupo = grupoVariacao;
+  }
 
   const { data, error } = await supabase
     .from(table)

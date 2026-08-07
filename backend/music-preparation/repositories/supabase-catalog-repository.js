@@ -1,9 +1,9 @@
 const CATALOGS = Object.freeze({
-  templates: Object.freeze({ table: 'templates_letras', columns: 'id,name,letra,active,categoria' }),
+  templates: Object.freeze({ table: 'templates_letras', columns: 'id,name,letra,active,categoria,tema,grupo' }),
   styles: Object.freeze({ table: 'estilos', columns: 'id,name,prompt,active,categoria' }),
-  periods: Object.freeze({ table: 'periodos', columns: 'id,name,texto,active,categoria' }),
-  weekdays: Object.freeze({ table: 'dias_semana', columns: 'id,name,texto,active,categoria' }),
-  climates: Object.freeze({ table: 'climas', columns: 'id,name,texto,active,categoria' }),
+  periods: Object.freeze({ table: 'periodos', columns: 'id,name,texto,active,categoria,tema,grupo' }),
+  weekdays: Object.freeze({ table: 'dias_semana', columns: 'id,name,texto,active,categoria,tema,grupo' }),
+  climates: Object.freeze({ table: 'climas', columns: 'id,name,texto,active,categoria,tema,grupo' }),
 });
 
 export class CatalogRepositoryError extends Error {

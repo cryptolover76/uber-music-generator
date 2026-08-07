@@ -71,7 +71,14 @@ app.get('/api/templates_letras', async (req, res) => {
 app.post('/api/admin/add', async (req, res) => {
   console.log('📥 Recebido no Admin:', req.body);
 
-  const { tipo, nome, conteudo, categoria } = req.body;
+  const {
+    tipo,
+    nome,
+    conteudo,
+    categoria,
+    grupo: grupoVariacaoRaw,
+    tema: temaRaw,
+  } = req.body;
 
   if (!tipo || !TIPOS_VALIDOS[tipo]) {
     return res.status(400).json({ success: false, error: `Tipo inválido: ${tipo}` });
@@ -83,8 +90,38 @@ app.post('/api/admin/add', async (req, res) => {
     return res.status(400).json({ success: false, error: 'O campo "Conteúdo" está vazio.' });
   }
 
+  let grupoVariacao = null;
+
+  if (
+    grupoVariacaoRaw !== undefined
+    && grupoVariacaoRaw !== null
+    && grupoVariacaoRaw !== ''
+  ) {
+    grupoVariacao = Number(grupoVariacaoRaw);
+
+    if (
+      !Number.isSafeInteger(grupoVariacao)
+      || grupoVariacao < 1
+      || grupoVariacao > 999
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'O grupo de variação deve ser um número inteiro entre 1 e 999.',
+      });
+    }
+  }
+
   try {
-    const item = await insertItem(tipo, nome.trim(), conteudo.trim(), categoria || null);
+    const item = await insertItem(
+      tipo,
+      nome.trim(),
+      conteudo.trim(),
+      categoria || null,
+      grupoVariacao,
+      TIPOS_VALIDOS[tipo].aceitaTema
+        ? String(temaRaw || 'Normal').trim()
+        : undefined,
+    );
     res.json({ success: true, item });
   } catch (error) {
     console.error('❌ Erro ao salvar:', error.message);
@@ -126,11 +163,51 @@ app.get('/api/admin/list/:tipo', async (req, res) => {
 
 app.put('/api/admin/update/:tipo/:id', async (req, res) => {
   const { tipo, id } = req.params;
-  const { nome, conteudo, categoria } = req.body;
+  const {
+    nome,
+    conteudo,
+    categoria,
+    grupo: grupoVariacaoRaw,
+    tema: temaRaw,
+  } = req.body;
   if (!TIPOS_VALIDOS[tipo]) return res.status(400).json({ error: 'Tipo inválido' });
   if (!nome || !conteudo) return res.status(400).json({ error: 'Nome e conteúdo obrigatórios' });
+  let grupoVariacao;
+
+  if (grupoVariacaoRaw !== undefined) {
+    if (
+      grupoVariacaoRaw === null
+      || grupoVariacaoRaw === ''
+    ) {
+      grupoVariacao = null;
+    } else {
+      grupoVariacao = Number(grupoVariacaoRaw);
+
+      if (
+        !Number.isSafeInteger(grupoVariacao)
+        || grupoVariacao < 1
+        || grupoVariacao > 999
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'O grupo de variação deve ser um número inteiro entre 1 e 999.',
+        });
+      }
+    }
+  }
+
   try {
-    const item = await updateItem(tipo, id, nome.trim(), conteudo.trim(), categoria !== undefined ? categoria : undefined);
+    const item = await updateItem(
+      tipo,
+      id,
+      nome.trim(),
+      conteudo.trim(),
+      categoria !== undefined ? categoria : undefined,
+      grupoVariacao,
+      TIPOS_VALIDOS[tipo].aceitaTema
+        ? String(temaRaw || 'Normal').trim()
+        : undefined,
+    );
     res.json({ success: true, item });
   } catch (error) {
     res.status(500).json({ error: error.message });

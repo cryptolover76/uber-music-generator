@@ -8,6 +8,10 @@ const ids = Object.freeze({
   template: '00000000-0000-4000-8000-000000000001', style: '00000000-0000-4000-8000-000000000002',
   period: '00000000-0000-4000-8000-000000000003', weekday: '00000000-0000-4000-8000-000000000004',
   weekend: '00000000-0000-4000-8000-000000000005', climate: '00000000-0000-4000-8000-000000000006',
+  template2: '00000000-0000-4000-8000-000000000011',
+  period2: '00000000-0000-4000-8000-000000000012',
+  weekday2: '00000000-0000-4000-8000-000000000013',
+  climate2: '00000000-0000-4000-8000-000000000014',
 });
 
 function catalogs({ exactWeekend = true } = {}) {
@@ -281,4 +285,102 @@ test('contrato de catálogo falha antes de clock ou persistência', () => {
   );
   assert.equal(clockCalls, 0);
   assert.equal(persistenceCalls, 0);
+});
+
+test('seleção automática mantém template, clima, período e dia no mesmo grupo de variação', async () => {
+  const grouped = {
+    templates: [
+      {
+        id: ids.template,
+        active: true,
+        name: 'Base 1',
+        letra: '[Chorus]\nTemplate grupo 1 para {NOME}.',
+        grupo: 1,
+      },
+      {
+        id: ids.template2,
+        active: true,
+        name: 'Base 2',
+        letra: '[Chorus]\nTemplate grupo 2 para {NOME}.',
+        grupo: 2,
+      },
+    ],
+    styles: [
+      {
+        id: ids.style,
+        active: true,
+        name: 'Samba',
+        prompt: 'samba alegre',
+      },
+    ],
+    periods: [
+      {
+        id: ids.period,
+        active: true,
+        categoria: 'Noite',
+        texto: 'Período grupo 1 para {NOME}.',
+        grupo: 1,
+      },
+      {
+        id: ids.period2,
+        active: true,
+        categoria: 'Noite',
+        texto: 'Período grupo 2 para {NOME}.',
+        grupo: 2,
+      },
+    ],
+    weekdays: [
+      {
+        id: ids.weekday,
+        active: true,
+        categoria: 'Sábado',
+        texto: 'Dia grupo 1 para {NOME}.',
+        grupo: 1,
+      },
+      {
+        id: ids.weekday2,
+        active: true,
+        categoria: 'Sábado',
+        texto: 'Dia grupo 2 para {NOME}.',
+        grupo: 2,
+      },
+    ],
+    climates: [
+      {
+        id: ids.climate,
+        active: true,
+        name: 'Ensolarado 1',
+        categoria: 'Ensolarado',
+        texto: 'Clima grupo 1 para {NOME}.',
+        grupo: 1,
+      },
+      {
+        id: ids.climate2,
+        active: true,
+        name: 'Ensolarado 2',
+        categoria: 'Ensolarado',
+        texto: 'Clima grupo 2 para {NOME}.',
+        grupo: 2,
+      },
+    ],
+  };
+
+  const dto = await service({ catalogs: grouped }).instance.prepare(
+    input({
+      climate_id: ids.climate2,
+      weather_status: 'applied',
+      weather_summary: 'Ensolarado',
+      weather_provider: 'open-meteo',
+    }),
+  );
+
+  assert.equal(dto.request.climate_id, ids.climate2);
+  assert.equal(dto.request.template_id, ids.template2);
+  assert.equal(dto.request.period_id, ids.period2);
+  assert.equal(dto.request.weekday_id, ids.weekday2);
+
+  assert.match(dto.lyrics, /Template grupo 2/);
+  assert.match(dto.lyrics, /Clima grupo 2/);
+  assert.match(dto.lyrics, /Período grupo 2/);
+  assert.match(dto.lyrics, /Dia grupo 2/);
 });

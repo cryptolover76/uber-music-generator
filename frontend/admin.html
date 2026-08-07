@@ -68,6 +68,34 @@
     </div>
   </div>
 
+  <div id="campoTema">
+    <label>Tema</label>
+    <input
+      type="text"
+      id="tema"
+      value="Normal"
+      placeholder="Ex: Normal, Dia dos Pais, Natal"
+    >
+    <div class="hint">
+      Use Normal para músicas comuns ou informe um tema especial.
+    </div>
+  </div>
+
+  <div id="campoGrupo">
+    <label>Variação</label>
+    <input
+      type="number"
+      id="grupoVariacao"
+      min="1"
+      max="999"
+      step="1"
+      placeholder="Ex: 1"
+    >
+    <div class="hint">
+      Use o mesmo número nos blocos que foram escritos para funcionar juntos.
+    </div>
+  </div>
+
     <label id="labelTexto">Texto / Letra</label>
     <textarea id="conteudo" placeholder="Escreva aqui... Use {NOME} onde quiser que o nome do passageiro apareça."></textarea>
     <div class="hint">💡 Placeholders: <b>{NOME}</b>, <b>{ARTIGO}</b> (o/a), <b>{PREP}</b> (do/da), <b>{NO_NA}</b> (no/na), <b>{PASSAGEIRO}</b> (passageiro/a), <b>{O_A}</b> (o/a). Marcadores em inglês: [Intro - Spoken: slow-paced, soft delivery], [Spoken: calm, slow spoken word], [Verse], [Chorus], [Bridge], [Pre-Chorus], [Outro].</div>
@@ -108,13 +136,24 @@
       const conteudo = document.getElementById('conteudo');
       const campoCategoria = document.getElementById('campoCategoria');
       const categoria = document.getElementById('categoria');
+      const campoGrupo = document.getElementById('campoGrupo');
+      const grupoVariacao = document.getElementById('grupoVariacao');
+      const campoTema = document.getElementById('campoTema');
+      const tema = document.getElementById('tema');
 
       if (isEstilo) {
         labelTexto.innerText = 'Prompt Musical (Descrição em inglês para a IA)';
         conteudo.placeholder = 'Ex: brazilian sertanejo, acoustic guitar, emotional vocals';
+        campoGrupo.style.display = 'none';
+        grupoVariacao.value = '';
+        campoTema.style.display = 'none';
+        tema.value = 'Normal';
       } else {
         labelTexto.innerText = 'Texto / Letra (Roteiro)';
         conteudo.placeholder = '[Intro - Spoken: slow-paced, soft delivery] Ei {NOME}, o dia tá lindo...\n\n[Verse]\nAproveita a viagem, {NOME}...';
+        campoGrupo.style.display = 'block';
+        campoTema.style.display = 'block';
+        if (!tema.value) tema.value = 'Normal';
       }
 
       try {
@@ -158,16 +197,26 @@
           const coluna = isEstilo ? 'prompt' : (item.letra ? 'letra' : 'texto');
           const preview = (item[coluna] || '').substring(0, 80);
           const categoriaTexto = item.categoria
-  ? `<div class="preview">Categoria: ${escapeHtml(item.categoria)}</div>`
-  : '';
+            ? `<div class="preview">Categoria: ${escapeHtml(item.categoria)}</div>`
+            : '';
+
+          const temaTexto = !isEstilo
+            ? `<div class="preview">Tema: ${escapeHtml(item.tema || 'Normal')}</div>`
+            : '';
+
+          const grupoTexto = item.grupo
+            ? `<div class="preview">Variação: ${item.grupo}</div>`
+            : '';
           return `<div class="item-row">
             <div class="info">
               <div class="name">${escapeHtml(item.name)}</div>
               ${categoriaTexto}
+              ${temaTexto}
+              ${grupoTexto}
               <div class="preview">${escapeHtml(preview)}${preview.length >= 80 ? '...' : ''}</div>
               </div>
             <div class="actions">
-              <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}','${escapeAttr(item.categoria || '')}')">✏️ Editar</button>
+              <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}','${escapeAttr(item.categoria || '')}','${item.grupo || ''}','${escapeAttr(item.tema || 'Normal')}')">✏️ Editar</button>
               <button class="danger" onclick="excluirItem('${item.id}','${escapeAttr(item.name)}')">🗑️ Excluir</button>
             </div>
           </div>`;
@@ -177,11 +226,22 @@
       }
     }
 
-    function editarItem(id, nome, conteudo, categoriaAtual) {
+    function editarItem(
+      id,
+      nome,
+      conteudo,
+      categoriaAtual,
+      grupoVariacaoAtual,
+      temaAtual,
+    ) {
       document.getElementById('editId').value = id;
       document.getElementById('nome').value = unescapeAttr(nome);
       document.getElementById('conteudo').value = unescapeAttr(conteudo);
       document.getElementById('categoria').value = unescapeAttr(categoriaAtual);
+      document.getElementById('grupoVariacao').value =
+        grupoVariacaoAtual || '';
+      document.getElementById('tema').value =
+        unescapeAttr(temaAtual) || 'Normal';
       document.getElementById('formTitle').innerText = '✏️ Editando Item';
       document.getElementById('btnCancelar').style.display = 'block';
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -192,6 +252,8 @@
       document.getElementById('nome').value = '';
       document.getElementById('conteudo').value = '';
       document.getElementById('categoria').value = '';
+      document.getElementById('grupoVariacao').value = '';
+      document.getElementById('tema').value = 'Normal';
       document.getElementById('formTitle').innerText = 'Adicionar Novo';
       document.getElementById('btnCancelar').style.display = 'none';
     }
@@ -201,11 +263,32 @@
       const nome = document.getElementById('nome').value.trim();
       const conteudo = document.getElementById('conteudo').value.trim();
       const categoria = document.getElementById('categoria').value || null;
+      const grupoVariacaoTexto =
+        document.getElementById('grupoVariacao').value.trim();
+      const grupoVariacao = grupoVariacaoTexto
+        ? Number(grupoVariacaoTexto)
+        : null;
+      const tema =
+        document.getElementById('tema').value.trim() || 'Normal';
       const msg = document.getElementById('msg');
 
       if (!nome || !conteudo) {
         msg.style.color = 'red';
         msg.innerText = 'Preencha o nome e o texto!';
+        return;
+      }
+
+      if (
+        grupoVariacao !== null
+        && (
+          !Number.isSafeInteger(grupoVariacao)
+          || grupoVariacao < 1
+          || grupoVariacao > 999
+        )
+      ) {
+        msg.style.color = 'red';
+        msg.innerText =
+          'A Variação deve ser um número inteiro entre 1 e 999.';
         return;
       }
 
@@ -216,8 +299,21 @@
         const url = id ? `/api/admin/update/${tipoAtual}/${id}` : '/api/admin/add';
         const method = id ? 'PUT' : 'POST';
         const body = id
-  ? { nome, conteudo, categoria }
-  : { tipo: tipoAtual, nome, conteudo, categoria };
+          ? {
+              nome,
+              conteudo,
+              categoria,
+              grupo: isEstilo ? null : grupoVariacao,
+              tema: isEstilo ? null : tema,
+            }
+          : {
+              tipo: tipoAtual,
+              nome,
+              conteudo,
+              categoria,
+              grupo: isEstilo ? null : grupoVariacao,
+              tema: isEstilo ? null : tema,
+            };
 
         const res = await fetch(url, {
           method,

@@ -1,5 +1,10 @@
 import { montarLetra } from '../../shared/substituir.js';
-import { applicableCatalogItems, CatalogSelectionError, defaultCatalogSelector } from './catalog-selector.js';
+import {
+  applicableCatalogItems,
+  CatalogSelectionError,
+  defaultCatalogSelector,
+  detectGroup,
+} from './catalog-selector.js';
 import { DEFAULT_TIMEZONE, getLocalContext } from './local-context.js';
 import { DuplicateTelegramUpdateError, MusicPreparationError, MusicRequestPersistenceError, validateMusicPreparationInput } from './validation.js';
 
@@ -117,41 +122,163 @@ export function createMusicPreparationService({
 
       const now = nowFrom(clock);
       const context = getLocalContext(now, timezone);
-      let template;
-      if (input.template_id) template = ensureManualItem(await findCatalog(catalogRepository, 'template', input.template_id), 'template', input.template_id);
-      else {
-        const templates = await listCatalog(catalogRepository, 'template');
-        template = select(catalogSelector, { items: templates, telegramUpdateId: input.telegram_update_id, catalogType: 'template' });
+      // O clima escolhido funciona como âncora da família musical.
+      // Quando ele possui grupo, template, período e dia
+      // precisam pertencer ao mesmo grupo.
+      let clima = null;
+      let selectedGroup = null;
+
+      if (input.climate_id) {
+        clima = ensureManualItem(
+          await findCatalog(
+            catalogRepository,
+            'climate',
+            input.climate_id,
+          ),
+          'climate',
+          input.climate_id,
+        );
       }
+
+  const templates = await listCatalog(
+    catalogRepository,
+    'template',
+  );
+
+  selectedGroup =
+    Number.isInteger(clima?.grupo) && clima.grupo > 0
+      ? clima.grupo
+      : detectGroup(templates, {
+          telegramUpdateId: input.telegram_update_id,
+          catalogType: 'template',
+        });
+
+  function itensDoGrupo(items) {
+    if (selectedGroup == null) return items;
+
+    return items.filter(
+      (item) => item.grupo === selectedGroup,
+    );
+  }
+
+      let template;
+
+      if (input.template_id) {
+        template = ensureManualItem(
+          await findCatalog(
+            catalogRepository,
+            'template',
+            input.template_id,
+          ),
+          'template',
+          input.template_id,
+        );
+      } else {
+        const templates = itensDoGrupo(
+          await listCatalog(catalogRepository, 'template'),
+        );
+
+        template = select(catalogSelector, {
+          items: templates,
+          telegramUpdateId: input.telegram_update_id,
+          catalogType: 'template',
+        });
+      }
+
       let style;
-      if (input.style_id) style = ensureManualItem(await findCatalog(catalogRepository, 'style', input.style_id), 'style', input.style_id);
-      else {
-        const styles = await listCatalog(catalogRepository, 'style');
-        style = select(catalogSelector, { items: styles, telegramUpdateId: input.telegram_update_id, catalogType: 'style' });
+
+      if (input.style_id) {
+        style = ensureManualItem(
+          await findCatalog(
+            catalogRepository,
+            'style',
+            input.style_id,
+          ),
+          'style',
+          input.style_id,
+        );
+      } else {
+        const styles = await listCatalog(
+          catalogRepository,
+          'style',
+        );
+
+        style = select(catalogSelector, {
+          items: styles,
+          telegramUpdateId: input.telegram_update_id,
+          catalogType: 'style',
+        });
       }
 
       let periodo;
-      if (input.period_id) periodo = ensureManualItem(await findCatalog(catalogRepository, 'period', input.period_id), 'period', input.period_id);
-      else {
-        const periods = await listCatalog(catalogRepository, 'period');
-        periodo = select(catalogSelector, { items: periods, telegramUpdateId: input.telegram_update_id, catalogType: 'period', category: context.periodCategory });
-      }
-      let dia;
-      if (input.weekday_id) dia = ensureManualItem(await findCatalog(catalogRepository, 'weekday', input.weekday_id), 'weekday', input.weekday_id);
-      else {
-        const weekdays = await listCatalog(catalogRepository, 'weekday');
-        let weekdayCategory = context.weekdayCategory;
-        if (context.isWeekend) {
-          try { select(catalogSelector, { items: weekdays, telegramUpdateId: input.telegram_update_id, catalogType: 'weekday', category: weekdayCategory }); }
-          catch (error) { if (!(error instanceof CatalogSelectionError)) throw error; weekdayCategory = 'Fim de semana'; }
-        }
-        dia = select(catalogSelector, { items: weekdays, telegramUpdateId: input.telegram_update_id, catalogType: 'weekday', category: weekdayCategory });
+
+      if (input.period_id) {
+        periodo = ensureManualItem(
+          await findCatalog(
+            catalogRepository,
+            'period',
+            input.period_id,
+          ),
+          'period',
+          input.period_id,
+        );
+      } else {
+        const periods = itensDoGrupo(
+          await listCatalog(catalogRepository, 'period'),
+        );
+
+        periodo = select(catalogSelector, {
+          items: periods,
+          telegramUpdateId: input.telegram_update_id,
+          catalogType: 'period',
+          category: context.periodCategory,
+        });
       }
 
-      let clima = null;
-      if (input.climate_id) {
-        clima = ensureManualItem(await findCatalog(catalogRepository, 'climate', input.climate_id), 'climate', input.climate_id);
+      let dia;
+
+      if (input.weekday_id) {
+        dia = ensureManualItem(
+          await findCatalog(
+            catalogRepository,
+            'weekday',
+            input.weekday_id,
+          ),
+          'weekday',
+          input.weekday_id,
+        );
+      } else {
+        const weekdays = itensDoGrupo(
+          await listCatalog(catalogRepository, 'weekday'),
+        );
+
+        let weekdayCategory = context.weekdayCategory;
+
+        if (context.isWeekend) {
+          try {
+            select(catalogSelector, {
+              items: weekdays,
+              telegramUpdateId: input.telegram_update_id,
+              catalogType: 'weekday',
+              category: weekdayCategory,
+            });
+          } catch (error) {
+            if (!(error instanceof CatalogSelectionError)) {
+              throw error;
+            }
+
+            weekdayCategory = 'Fim de semana';
+          }
+        }
+
+        dia = select(catalogSelector, {
+          items: weekdays,
+          telegramUpdateId: input.telegram_update_id,
+          catalogType: 'weekday',
+          category: weekdayCategory,
+        });
       }
+
       const partes = [periodo, clima, dia].filter(Boolean);
       const lyrics = montarLetra(partes, template, input.passenger_name, input.passenger_gender);
       const title = `Para ${input.passenger_name}`;

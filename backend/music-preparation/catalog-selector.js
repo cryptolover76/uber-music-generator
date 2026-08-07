@@ -57,8 +57,36 @@ export function selectCatalogItem({ items, telegramUpdateId, catalogType, catego
   return candidates[index];
 }
 
-export function createCatalogSelector() {
-  return { select: selectCatalogItem };
+export function detectGroup(items, { catalogType, category = null, telegramUpdateId }) {
+  const candidates = applicableCatalogItems(items, { catalogType, category });
+
+  const groups = [
+    ...new Set(
+      candidates
+        .map(item => item.grupo)
+        .filter(group => Number.isInteger(group))
+    ),
+  ].sort((a, b) => a - b);
+
+  if (!groups.length) {
+    return null;
+  }
+
+  const digest = createHash('sha256')
+    .update(`${telegramUpdateId}:${catalogType}:group`, 'utf8')
+    .digest();
+
+  return groups[
+    Number(digest.readBigUInt64BE(0) % BigInt(groups.length))
+  ];
 }
 
-export const defaultCatalogSelector = Object.freeze({ select: selectCatalogItem });
+export function createCatalogSelector() {
+  return {select: selectCatalogItem,detectGroup,
+  };
+}
+
+export const defaultCatalogSelector = Object.freeze({
+  select: selectCatalogItem,
+  detectGroup,
+});
