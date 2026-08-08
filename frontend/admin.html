@@ -109,6 +109,46 @@
 
   <div class="card">
     <div class="form-title">Itens Cadastrados</div>
+
+    <div id="filtrosLista" style="
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:10px;
+      margin:15px 0;
+    ">
+      <div>
+        <label>Filtrar Tema</label>
+        <select id="filtroTema" onchange="aplicarFiltros()">
+          <option value="">Todos</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Filtrar Variação</label>
+        <select id="filtroGrupo" onchange="aplicarFiltros()">
+          <option value="">Todas</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Filtrar Categoria</label>
+        <select id="filtroCategoria" onchange="aplicarFiltros()">
+          <option value="">Todas</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Pesquisar</label>
+        <input
+          type="text"
+          id="filtroBusca"
+          placeholder="Nome ou texto..."
+          oninput="aplicarFiltros()"
+        >
+      </div>
+    </div>
+
+    <div id="contadorLista" class="hint"></div>
     <div class="item-list" id="lista"></div>
   </div>
 
@@ -119,6 +159,7 @@
   <script>
     let tipoAtual = 'templates_letras';
     let isEstilo = false;
+    let itensCarregados = [];
 
     const tabs = document.querySelectorAll('.tab');
     tabs.forEach(tab => tab.addEventListener('click', () => {
@@ -182,47 +223,186 @@
       }
     }
 
+    function atualizarFiltros() {
+      const filtroTema = document.getElementById('filtroTema');
+      const filtroGrupo = document.getElementById('filtroGrupo');
+      const filtroCategoria = document.getElementById('filtroCategoria');
+
+      const temaAtual = filtroTema.value;
+      const grupoAtual = filtroGrupo.value;
+      const categoriaAtual = filtroCategoria.value;
+
+      const temas = [...new Set(
+        itensCarregados
+          .map(item => item.tema || 'Normal')
+          .filter(Boolean)
+      )].sort((a, b) => {
+        if (a === 'Normal' && b !== 'Normal') return -1;
+        if (b === 'Normal' && a !== 'Normal') return 1;
+        return a.localeCompare(b, 'pt-BR', { sensitivity: 'base' });
+      });
+
+      const grupos = [...new Set(
+        itensCarregados
+          .map(item => item.grupo)
+          .filter(grupo => grupo !== null && grupo !== undefined)
+      )].sort((a, b) => Number(a) - Number(b));
+
+      const categorias = [...new Set(
+        itensCarregados
+          .map(item => item.categoria)
+          .filter(Boolean)
+      )].sort((a, b) =>
+        a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+      );
+
+      filtroTema.innerHTML =
+        '<option value="">Todos</option>' +
+        temas.map(tema =>
+          `<option value="${escapeHtml(tema)}">${escapeHtml(tema)}</option>`
+        ).join('');
+
+      filtroGrupo.innerHTML =
+        '<option value="">Todas</option>' +
+        grupos.map(grupo =>
+          `<option value="${grupo}">${grupo}</option>`
+        ).join('');
+
+      filtroCategoria.innerHTML =
+        '<option value="">Todas</option>' +
+        categorias.map(categoria =>
+          `<option value="${escapeHtml(categoria)}">${escapeHtml(categoria)}</option>`
+        ).join('');
+
+      filtroTema.value = temas.includes(temaAtual) ? temaAtual : '';
+      filtroGrupo.value = grupos.map(String).includes(grupoAtual) ? grupoAtual : '';
+      filtroCategoria.value = categorias.includes(categoriaAtual) ? categoriaAtual : '';
+
+      filtroTema.parentElement.style.display = isEstilo ? 'none' : 'block';
+      filtroGrupo.parentElement.style.display = isEstilo ? 'none' : 'block';
+    }
+
+    function renderizarLista(data) {
+      const lista = document.getElementById('lista');
+      const contador = document.getElementById('contadorLista');
+
+      contador.textContent = `${data.length} item(ns) exibido(s)`;
+
+      if (!data.length) {
+        lista.innerHTML =
+          '<div class="empty">Nenhum item encontrado com estes filtros.</div>';
+        return;
+      }
+
+      lista.innerHTML = data.map(item => {
+        const coluna =
+          isEstilo ? 'prompt' : (item.letra ? 'letra' : 'texto');
+
+        const preview = (item[coluna] || '').substring(0, 100);
+
+        const categoriaTexto = item.categoria
+          ? `<div class="preview"><b>Categoria:</b> ${escapeHtml(item.categoria)}</div>`
+          : '';
+
+        const temaTexto = !isEstilo
+          ? `<div class="preview"><b>Tema:</b> ${escapeHtml(item.tema || 'Normal')}</div>`
+          : '';
+
+        const grupoTexto = !isEstilo
+          ? `<div class="preview"><b>Variação:</b> ${item.grupo ?? 'Sem grupo'}</div>`
+          : '';
+
+        const criadoTexto = item.created_at
+          ? `<div class="preview"><b>Criado:</b> ${new Date(item.created_at).toLocaleString('pt-BR')}</div>`
+          : '';
+
+        return `<div class="item-row">
+          <div class="info">
+            <div class="name">${escapeHtml(item.name)}</div>
+            ${temaTexto}
+            ${grupoTexto}
+            ${categoriaTexto}
+            ${criadoTexto}
+            <div class="preview">${escapeHtml(preview)}${preview.length >= 100 ? '...' : ''}</div>
+          </div>
+
+          <div class="actions">
+            <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}','${escapeAttr(item.categoria || '')}','${item.grupo || ''}','${escapeAttr(item.tema || 'Normal')}')">✏️ Editar</button>
+            <button class="danger" onclick="excluirItem('${item.id}','${escapeAttr(item.name)}')">🗑️ Excluir</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function aplicarFiltros() {
+      const tema = document.getElementById('filtroTema').value;
+      const grupo = document.getElementById('filtroGrupo').value;
+      const categoria = document.getElementById('filtroCategoria').value;
+      const busca = document
+        .getElementById('filtroBusca')
+        .value
+        .trim()
+        .toLocaleLowerCase('pt-BR');
+
+      const filtrados = itensCarregados.filter(item => {
+        const itemTema = item.tema || 'Normal';
+        const itemGrupo =
+          item.grupo === null || item.grupo === undefined
+            ? ''
+            : String(item.grupo);
+
+        if (tema && itemTema !== tema) return false;
+        if (grupo && itemGrupo !== grupo) return false;
+        if (categoria && item.categoria !== categoria) return false;
+
+        if (busca) {
+          const coluna =
+            isEstilo ? 'prompt' : (item.letra ? 'letra' : 'texto');
+
+          const textoBusca = [
+            item.name,
+            item.categoria,
+            itemTema,
+            itemGrupo,
+            item[coluna],
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLocaleLowerCase('pt-BR');
+
+          if (!textoBusca.includes(busca)) return false;
+        }
+
+        return true;
+      });
+
+      renderizarLista(filtrados);
+    }
+
     async function carregarLista() {
       const lista = document.getElementById('lista');
+      const contador = document.getElementById('contadorLista');
+
       lista.innerHTML = '<div class="empty">Carregando...</div>';
+      contador.textContent = '';
+
       try {
         const res = await fetch(`/api/admin/list/${tipoAtual}`);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erro');
-        if (!data || data.length === 0) {
-          lista.innerHTML = '<div class="empty">Nenhum item cadastrado. Adicione acima!</div>';
-          return;
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Erro');
         }
-        lista.innerHTML = data.map(item => {
-          const coluna = isEstilo ? 'prompt' : (item.letra ? 'letra' : 'texto');
-          const preview = (item[coluna] || '').substring(0, 80);
-          const categoriaTexto = item.categoria
-            ? `<div class="preview">Categoria: ${escapeHtml(item.categoria)}</div>`
-            : '';
 
-          const temaTexto = !isEstilo
-            ? `<div class="preview">Tema: ${escapeHtml(item.tema || 'Normal')}</div>`
-            : '';
+        itensCarregados = Array.isArray(data) ? data : [];
 
-          const grupoTexto = item.grupo
-            ? `<div class="preview">Variação: ${item.grupo}</div>`
-            : '';
-          return `<div class="item-row">
-            <div class="info">
-              <div class="name">${escapeHtml(item.name)}</div>
-              ${categoriaTexto}
-              ${temaTexto}
-              ${grupoTexto}
-              <div class="preview">${escapeHtml(preview)}${preview.length >= 80 ? '...' : ''}</div>
-              </div>
-            <div class="actions">
-              <button class="secondary" onclick="editarItem('${item.id}','${escapeAttr(item.name)}','${escapeAttr(item[coluna] || '')}','${escapeAttr(item.categoria || '')}','${item.grupo || ''}','${escapeAttr(item.tema || 'Normal')}')">✏️ Editar</button>
-              <button class="danger" onclick="excluirItem('${item.id}','${escapeAttr(item.name)}')">🗑️ Excluir</button>
-            </div>
-          </div>`;
-        }).join('');
+        atualizarFiltros();
+        aplicarFiltros();
       } catch (e) {
-        lista.innerHTML = `<div class="empty">Erro ao carregar: ${e.message}</div>`;
+        itensCarregados = [];
+        contador.textContent = '';
+        lista.innerHTML =
+          `<div class="empty">Erro ao carregar: ${escapeHtml(e.message)}</div>`;
       }
     }
 
