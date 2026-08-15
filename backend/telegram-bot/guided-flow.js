@@ -4,11 +4,23 @@ import {
 } from '../music-preparation/catalog-selector.js';
 import { callbackDataBytes, parseMusicCommand } from './parsers.js';
 import { normalizePassengerName } from '../music-preparation/validation.js';
+import { getLocalContext } from '../music-preparation/local-context.js';
 
 const PAGE_SIZE = 8;
 const GENDERS = Object.freeze({ M: 'Masculino', F: 'Feminino', N: 'Neutro' });
-const CLIMATE_ICONS = Object.freeze({ Ensolarado: '☀️', Nublado: '☁️', Chuvoso: '🌧️' });
-const CLIMATE_ORDER = Object.freeze({ Ensolarado: 0, Nublado: 1, Chuvoso: 2 });
+const CLIMATE_ICONS = Object.freeze({
+  Ensolarado: '☀️',
+  'Céu limpo': '🌙',
+  Nublado: '☁️',
+  Chuvoso: '🌧️',
+});
+
+const CLIMATE_ORDER = Object.freeze({
+  Ensolarado: 0,
+  'Céu limpo': 1,
+  Nublado: 2,
+  Chuvoso: 3,
+});
 const terminalState = (row) => row?.last_error === 'GUIDED_COMPLETED' || row?.last_error === 'GUIDED_CANCELLED' || row?.last_error?.startsWith('GUIDED_FINALIZING:');
 const owner = (payload, ids) => {
   const from = payload?.message?.from ?? payload?.callback_query?.from;
@@ -30,7 +42,7 @@ function sortedCatalog(rows, type) {
   return applicableCatalogItems(rows, { catalogType: type }).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }) || a.id.localeCompare(b.id));
 }
 
-export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWithStyle, weatherService, send }) {
+export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWithStyle, weatherService, send, clock = () => new Date() }) {
   async function originalFromGender(genderUpdateId, ids) {
     const genderRow = await repository.getGuidedUpdate(genderUpdateId);
     if (!genderRow || !owner(genderRow.payload, ids)) return null;
@@ -159,11 +171,41 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
     rows.push([button('Cancelar', `x:${originId}`)]);
     await send(chatId, `Escolha o ritmo (${safePage + 1}/${pages}):`, { reply_markup: { inline_keyboard: rows } });
   }
-  async function fallback(chatId, styleUpdateId, originId, theme = 'Normal') {
+  async function fallback(
+    chatId,
+    styleUpdateId,
+    originId,
+    theme = 'Normal',
+    message = 'Não consegui verificar o clima. Como está o tempo agora?',
+  ) {
     const items = await climates(theme);
-    const rows = items.map((item) => [button(`${CLIMATE_ICONS[item.categoria]} ${item.categoria}`, `c:${styleUpdateId}:${item.id}`)]);
-    rows.push([button('❌ Cancelar', `x:${originId}`)]);
-    await send(chatId, 'Não consegui verificar o clima. Como está o tempo agora?', { reply_markup: { inline_keyboard: rows } });
+
+    const unicos = [];
+    const categorias = new Set();
+
+    for (const item of items) {
+      if (categorias.has(item.categoria)) continue;
+
+      categorias.add(item.categoria);
+      unicos.push(item);
+    }
+
+    const rows = unicos.map((item) => [
+      button(
+        `${CLIMATE_ICONS[item.categoria]} ${item.categoria}`,
+        `c:${styleUpdateId}:${item.id}`,
+      ),
+    ]);
+
+    rows.push([
+      button('❌ Cancelar', `x:${originId}`),
+    ]);
+
+    await send(
+      chatId,
+      message,
+      { reply_markup: { inline_keyboard: rows } },
+    );
   }
   async function prepare(state, update, ids, style, climate, weather) {
     const expectedMarker = `GUIDED_FINALIZING:${update.update_id}`;
@@ -274,10 +316,21 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
         }
         const location = await repository.getLocation?.(ids.userId, ids.chatId) ?? null; const current = location ? await weatherService?.current?.(location) ?? null : null;
         if (current) {
+          const localContext = getLocalContext(
+            clock(),
+            'America/Sao_Paulo',
+          );
+
+          const climateCategory =
+            current.category === 'Ensolarado'
+            && localContext.periodCategory === 'Noite'
+              ? 'Céu limpo'
+              : current.category;
+
           const matching = (
             await climates(state.theme || 'Normal')
           ).filter(
-            (item) => item.categoria === current.category,
+            (item) => item.categoria === climateCategory,
           );
 
           if (matching.length) {
@@ -285,18 +338,35 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
               items: matching,
               telegramUpdateId: update.update_id,
               catalogType: 'climate',
-              category: current.category,
+              category: climateCategory,
             });
 
-            await prepare(
-              state,
-              update,
-              ids,
-              style,
-              climate,
+            await send(
+              ids.chatId,
+              `Clima detectado: ${CLIMATE_ICONS[climateCategory] || ''} ${climateCategory}\nEstá correto?`,
               {
-                summary: current.summary,
-                provider: 'open-meteo',
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      button(
+                        `✅ ${climateCategory}`,
+                        `a:${update.update_id}:${climate.id}`,
+                      ),
+                    ],
+                    [
+                      button(
+                        '🔄 Trocar clima',
+                        `w:${update.update_id}`,
+                      ),
+                    ],
+                    [
+                      button(
+                        '❌ Cancelar',
+                        `x:${state.original.update_id}`,
+                      ),
+                    ],
+                  ],
+                },
               },
             );
 
@@ -311,6 +381,93 @@ export function createGuidedMusicFlow({ api, repository, styleCatalog, prepareWi
         );
         return true;
       }
+      match = data.match(/^a:(\d+):([0-9a-f-]{36})$/iu);
+      if (match) {
+        const state = await stateFromStyle(match[1], ids);
+
+        if (!state) {
+          await invalid(query);
+          return true;
+        }
+
+        if (terminalState(state.original)) {
+          await api.answerCallbackQuery(
+            query.id,
+            { text: 'Pedido já processado.' },
+          );
+          return true;
+        }
+
+        const [style, climate] = await Promise.all([
+          styleCatalog.findById('styles', state.styleId),
+          styleCatalog.findById('climates', match[2]),
+        ]);
+
+        if (!style || !climate) {
+          await invalid(query);
+          return true;
+        }
+
+        const selectedTheme = state.theme || 'Normal';
+        const climateTheme =
+          typeof climate.tema === 'string' && climate.tema.trim()
+            ? climate.tema.trim()
+            : 'Normal';
+
+        if (climateTheme !== selectedTheme) {
+          await invalid(query);
+          return true;
+        }
+
+        await api.answerCallbackQuery(query.id);
+
+        const location =
+          await repository.getLocation?.(
+            ids.userId,
+            ids.chatId,
+          ) ?? null;
+
+        const current = location
+          ? await weatherService?.current?.(location) ?? null
+          : null;
+
+        await prepare(
+          state,
+          update,
+          ids,
+          style,
+          climate,
+          {
+            summary: current?.summary || climate.categoria,
+            provider: current ? 'open-meteo' : null,
+          },
+        );
+
+        return true;
+      }
+
+      match = data.match(/^w:(\d+)$/u);
+      if (match) {
+        const state = await stateFromStyle(match[1], ids);
+
+        if (!state || terminalState(state.original)) {
+          await invalid(query);
+          return true;
+        }
+
+        await api.answerCallbackQuery(query.id);
+
+        await fallback(
+          ids.chatId,
+          match[1],
+          state.original.update_id,
+          state.theme || 'Normal',
+          'Escolha o clima correto:',
+        );
+
+        return true;
+      }
+
       match = data.match(/^c:(\d+):([0-9a-f-]{36})$/iu);
       if (match) {
         const state = await stateFromStyle(match[1], ids); if (!state) { await invalid(query); return true; }

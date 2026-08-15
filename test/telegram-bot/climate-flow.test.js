@@ -20,16 +20,69 @@ function setup({ weather = null, location = { latitude: 1, longitude: 2 }, clima
   const catalog = { async list(type) { return type === 'climates' ? rows : [style]; }, async findById(type, id) { return (type === 'climates' ? rows : [style]).find((row) => row.id === id && row.active) ?? null; } };
   const api = { async answerCallbackQuery(_id, value = {}) { answers.push(value); } };
   const prepareWithStyle = async (input, styleId) => { prepared.push({ input, styleId }); return { request: { id: '20000000-0000-4000-8000-000000000001', passenger_name: input.name, passenger_gender: input.gender, title: 'Para Carlos', style_name: 'Samba', local_period: 'Tarde', local_weekday: 'Segunda' } }; };
-  const flow = createGuidedMusicFlow({ api, repository, styleCatalog: catalog, prepareWithStyle, weatherService: { async current() { return weather; } }, send: async (_chat, text, options) => sent.push({ text, options }) });
+  const flow = createGuidedMusicFlow({
+    api,
+    repository,
+    styleCatalog: catalog,
+    prepareWithStyle,
+    weatherService: { async current() { return weather; } },
+    send: async (_chat, text, options) => sent.push({ text, options }),
+    clock: () => new Date('2026-08-07T13:00:00.000Z'),
+  });
   return { flow, sent, prepared, answers, rows };
 }
 
-test('clima automático seleciona categoria ativa e persiste metadados Open-Meteo', async () => {
-  const s = setup({ weather: { category: 'Ensolarado', summary: 'Ensolarado; temperatura 25 °C' } });
-  await s.flow.callback(callback(300, `r:200:${style.id}`), ids);
-  assert.equal(s.prepared.length, 1); assert.equal(s.prepared[0].input.climate_id, climate(1, 'Ensolarado').id);
-  assert.equal(s.prepared[0].input.weather_provider, 'open-meteo'); assert.equal(s.prepared[0].input.weather_status, 'applied');
-  assert.match(s.sent[0].text, /Clima: Ensolarado/u);
+test('clima automático pede confirmação e só prepara após confirmar', async () => {
+  const s = setup({
+    weather: {
+      category: 'Ensolarado',
+      summary: 'Ensolarado; temperatura 25 °C',
+    },
+  });
+
+  await s.flow.callback(
+    callback(300, `r:200:${style.id}`),
+    ids,
+  );
+
+  assert.equal(s.prepared.length, 0);
+  assert.match(
+    s.sent[0].text,
+    /Clima detectado: ☀️ Ensolarado/u,
+  );
+
+  const buttons =
+    s.sent[0].options.reply_markup.inline_keyboard.flat();
+
+  const confirmar = buttons.find(
+    item => item.callback_data?.startsWith('a:'),
+  );
+
+  const trocar = buttons.find(
+    item => item.callback_data?.startsWith('w:'),
+  );
+
+  assert.ok(confirmar);
+  assert.ok(trocar);
+
+  await s.flow.callback(
+    callback(301, confirmar.callback_data),
+    ids,
+  );
+
+  assert.equal(s.prepared.length, 1);
+  assert.equal(
+    s.prepared[0].input.climate_id,
+    climate(1, 'Ensolarado').id,
+  );
+  assert.equal(
+    s.prepared[0].input.weather_provider,
+    'open-meteo',
+  );
+  assert.equal(
+    s.prepared[0].input.weather_status,
+    'applied',
+  );
 });
 
 test('ausência de localização ou falha meteorológica abre fallback sem categoria null', async () => {
@@ -46,4 +99,49 @@ test('clima manual revalida dono e catálogo e continua a mesma preparação', a
   assert.equal(s.prepared[0].input.climate_id, selected.id); assert.equal(s.prepared[0].input.weather_provider, null); assert.equal(s.prepared[0].input.weather_summary, 'Nublado');
   const wrong = setup({ location: null }); await wrong.flow.callback(callback(401, `c:300:${selected.id}`, 11, 11), { userId: 11, chatId: 11 });
   assert.equal(wrong.prepared.length, 0); assert.equal(wrong.answers[0].text, 'Opção inválida ou expirada.');
+});
+
+
+test('trocar clima abre seleção manual sem preparar pedido', async () => {
+  const s = setup({
+    weather: {
+      category: 'Ensolarado',
+      summary: 'Ensolarado; temperatura 25 °C',
+    },
+  });
+
+  await s.flow.callback(
+    callback(300, `r:200:${style.id}`),
+    ids,
+  );
+
+  const trocar = s.sent[0]
+    .options.reply_markup.inline_keyboard
+    .flat()
+    .find(item => item.callback_data?.startsWith('w:'));
+
+  assert.ok(trocar);
+
+  await s.flow.callback(
+    callback(302, trocar.callback_data),
+    ids,
+  );
+
+  assert.equal(s.prepared.length, 0);
+
+  const ultimo = s.sent.at(-1);
+
+  assert.match(
+    ultimo.text,
+    /Como está o tempo agora/u,
+  );
+
+  const textos =
+    ultimo.options.reply_markup.inline_keyboard
+      .flat()
+      .map(item => item.text);
+
+  assert.ok(textos.includes('☀️ Ensolarado'));
+  assert.ok(textos.includes('☁️ Nublado'));
+  assert.ok(textos.includes('🌧️ Chuvoso'));
 });

@@ -167,13 +167,119 @@ export function createMusicPreparationService({
         await listCatalog(catalogRepository, 'template'),
       );
 
-      selectedGroup =
-        Number.isInteger(clima?.grupo) && clima.grupo > 0
-          ? clima.grupo
-          : detectGroup(templatesDoTema, {
+      let selectedWeekdayCategory = context.weekdayCategory;
+
+      if (input.selection_mode === 'automatic') {
+        const periodsDoTema = itensDoTema(
+          await listCatalog(catalogRepository, 'period'),
+        );
+
+        const weekdaysDoTema = itensDoTema(
+          await listCatalog(catalogRepository, 'weekday'),
+        );
+
+        const climatesDoTema = itensDoTema(
+          await listCatalog(catalogRepository, 'climate'),
+        );
+
+        function grupos(items, category = null) {
+          return new Set(
+            items
+              .filter((item) =>
+                (category == null || item.categoria === category)
+                && Number.isInteger(item.grupo)
+                && item.grupo > 0
+              )
+              .map((item) => item.grupo),
+          );
+        }
+
+        function intersecao(...sets) {
+          if (!sets.length) return [];
+
+          return [...sets[0]].filter(
+            (value) => sets.every((set) => set.has(value)),
+          );
+        }
+
+        const templateGroups = grupos(templatesDoTema);
+        const periodGroups = grupos(
+          periodsDoTema,
+          context.periodCategory,
+        );
+
+        const requiredSets = [
+          templateGroups,
+          periodGroups,
+        ];
+
+        if (clima?.categoria) {
+          requiredSets.push(
+            grupos(climatesDoTema, clima.categoria),
+          );
+        }
+
+        let completeGroups = intersecao(
+          ...requiredSets,
+          grupos(weekdaysDoTema, selectedWeekdayCategory),
+        );
+
+        if (
+          !completeGroups.length
+          && context.isWeekend
+        ) {
+          const weekendGroups = intersecao(
+            ...requiredSets,
+            grupos(weekdaysDoTema, 'Fim de semana'),
+          );
+
+          if (weekendGroups.length) {
+            selectedWeekdayCategory = 'Fim de semana';
+            completeGroups = weekendGroups;
+          }
+        }
+
+        const usesGroups =
+          templateGroups.size > 0;
+
+        if (usesGroups && !completeGroups.length) {
+          throw new CatalogSelectionError(
+            'variation-group',
+            `${selectedTheme}:${context.periodCategory}:${selectedWeekdayCategory}`,
+          );
+        }
+
+        if (completeGroups.length) {
+          selectedGroup = detectGroup(
+            templatesDoTema.filter(
+              (item) => completeGroups.includes(item.grupo),
+            ),
+            {
               telegramUpdateId: input.telegram_update_id,
               catalogType: 'template',
+            },
+          );
+
+          if (clima?.categoria) {
+            clima = select(catalogSelector, {
+              items: climatesDoTema.filter(
+                (item) => item.grupo === selectedGroup,
+              ),
+              telegramUpdateId: input.telegram_update_id,
+              catalogType: 'climate',
+              category: clima.categoria,
             });
+          }
+        }
+      } else {
+        selectedGroup =
+          Number.isInteger(clima?.grupo) && clima.grupo > 0
+            ? clima.grupo
+            : detectGroup(templatesDoTema, {
+                telegramUpdateId: input.telegram_update_id,
+                catalogType: 'template',
+              });
+      }
 
       function itensDoGrupo(items) {
         const itemsDoTema = itensDoTema(items);
@@ -278,7 +384,7 @@ export function createMusicPreparationService({
           await listCatalog(catalogRepository, 'weekday'),
         );
 
-        let weekdayCategory = context.weekdayCategory;
+        let weekdayCategory = selectedWeekdayCategory;
 
         if (context.isWeekend) {
           try {

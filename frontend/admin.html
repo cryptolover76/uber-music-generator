@@ -70,14 +70,20 @@
 
   <div id="campoTema">
     <label>Tema</label>
+
     <input
       type="text"
-      id="tema"
+      id="temaNovo"
       value="Normal"
       placeholder="Ex: Normal, Dia dos Pais, Natal"
     >
-    <div class="hint">
-      Use Normal para músicas comuns ou informe um tema especial.
+
+    <select id="temaExistente" style="display:none;">
+      <option value="Normal">Normal</option>
+    </select>
+
+    <div class="hint" id="temaHint">
+      Na aba Letra você pode criar novos temas.
     </div>
   </div>
 
@@ -109,6 +115,39 @@
 
   <div class="card">
     <div class="form-title">Itens Cadastrados</div>
+
+    <div style="
+      margin:15px 0;
+      border:1px solid #444;
+      border-radius:8px;
+      overflow:hidden;
+    ">
+      <button
+        type="button"
+        id="btnResumoTemas"
+        onclick="alternarResumoTemas()"
+        style="
+          width:100%;
+          text-align:left;
+          padding:12px;
+          border:0;
+          cursor:pointer;
+        "
+      >
+        ▶ Resumo de Temas
+      </button>
+
+      <div
+        id="resumoTemas"
+        style="
+          display:none;
+          padding:12px;
+          border-top:1px solid #444;
+        "
+      >
+        <div class="hint">Carregando resumo...</div>
+      </div>
+    </div>
 
     <div id="filtrosLista" style="
       display:grid;
@@ -180,7 +219,9 @@
       const campoGrupo = document.getElementById('campoGrupo');
       const grupoVariacao = document.getElementById('grupoVariacao');
       const campoTema = document.getElementById('campoTema');
-      const tema = document.getElementById('tema');
+      const temaNovo = document.getElementById('temaNovo');
+      const temaExistente = document.getElementById('temaExistente');
+      const temaHint = document.getElementById('temaHint');
 
       if (isEstilo) {
         labelTexto.innerText = 'Prompt Musical (Descrição em inglês para a IA)';
@@ -188,13 +229,27 @@
         campoGrupo.style.display = 'none';
         grupoVariacao.value = '';
         campoTema.style.display = 'none';
-        tema.value = 'Normal';
+        temaNovo.value = 'Normal';
+        temaExistente.value = 'Normal';
       } else {
         labelTexto.innerText = 'Texto / Letra (Roteiro)';
         conteudo.placeholder = '[Intro - Spoken: slow-paced, soft delivery] Ei {NOME}, o dia tá lindo...\n\n[Verse]\nAproveita a viagem, {NOME}...';
         campoGrupo.style.display = 'block';
         campoTema.style.display = 'block';
-        if (!tema.value) tema.value = 'Normal';
+
+        if (tipoAtual === 'templates_letras') {
+          temaNovo.style.display = 'block';
+          temaExistente.style.display = 'none';
+          temaHint.innerText =
+            'Na aba Letra você pode criar novos temas.';
+          if (!temaNovo.value) temaNovo.value = 'Normal';
+        } else {
+          temaNovo.style.display = 'none';
+          temaExistente.style.display = 'block';
+          temaHint.innerText =
+            'Escolha um tema já criado na aba Letra.';
+          await carregarTemasExistentes();
+        }
       }
 
       try {
@@ -220,6 +275,102 @@
         campoCategoria.style.display = 'none';
         categoria.value = '';
         console.error('Erro ao carregar categorias:', error);
+      }
+    }
+
+    function alternarResumoTemas() {
+      const painel = document.getElementById('resumoTemas');
+      const botao = document.getElementById('btnResumoTemas');
+
+      const aberto = painel.style.display !== 'none';
+
+      painel.style.display = aberto ? 'none' : 'block';
+      botao.textContent = aberto
+        ? '▶ Resumo de Temas'
+        : '▼ Resumo de Temas';
+    }
+
+    async function carregarResumoTemas() {
+      const painel = document.getElementById('resumoTemas');
+
+      try {
+        const res = await fetch('/api/admin/list/templates_letras');
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Erro');
+        }
+
+        const templates = Array.isArray(data) ? data : [];
+        const gruposPorTema = new Map();
+
+        for (const item of templates) {
+          const tema =
+            typeof item.tema === 'string' && item.tema.trim()
+              ? item.tema.trim()
+              : 'Normal';
+
+          if (!gruposPorTema.has(tema)) {
+            gruposPorTema.set(tema, new Set());
+          }
+
+          if (
+            item.grupo !== null
+            && item.grupo !== undefined
+          ) {
+            gruposPorTema.get(tema).add(Number(item.grupo));
+          }
+        }
+
+        const temas = [...gruposPorTema.keys()].sort((a, b) => {
+          if (a === 'Normal' && b !== 'Normal') return -1;
+          if (b === 'Normal' && a !== 'Normal') return 1;
+
+          return a.localeCompare(
+            b,
+            'pt-BR',
+            { sensitivity: 'base' }
+          );
+        });
+
+        const totalVariacoes = [...gruposPorTema.values()]
+          .reduce((total, grupos) => total + grupos.size, 0);
+
+        const linhas = temas.map(tema => {
+          const quantidade = gruposPorTema.get(tema).size;
+
+          return `
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              gap:10px;
+              padding:5px 0;
+            ">
+              <strong>${escapeHtml(tema)}</strong>
+              <span>
+                ${quantidade}
+                ${quantidade === 1 ? 'variação' : 'variações'}
+              </span>
+            </div>
+          `;
+        }).join('');
+
+        painel.innerHTML = `
+          <div style="
+            display:flex;
+            gap:20px;
+            flex-wrap:wrap;
+            margin-bottom:10px;
+          ">
+            <strong>Temas: ${temas.length}</strong>
+            <strong>Variações: ${totalVariacoes}</strong>
+          </div>
+
+          ${linhas || '<div class="hint">Nenhum tema cadastrado.</div>'}
+        `;
+      } catch (error) {
+        painel.innerHTML =
+          `<div class="empty">Erro ao carregar resumo: ${escapeHtml(error.message)}</div>`;
       }
     }
 
@@ -379,6 +530,69 @@
       renderizarLista(filtrados);
     }
 
+    async function carregarTemasExistentes() {
+      const select = document.getElementById('temaExistente');
+      const valorAtual = select.value;
+
+      try {
+        const res = await fetch('/api/admin/list/templates_letras');
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Erro ao carregar temas');
+        }
+
+        const temas = [...new Set(
+          (Array.isArray(data) ? data : [])
+            .filter(item => item.active !== false)
+            .map(item =>
+              typeof item.tema === 'string' && item.tema.trim()
+                ? item.tema.trim()
+                : 'Normal'
+            )
+        )].sort((a, b) => {
+          if (a === 'Normal' && b !== 'Normal') return -1;
+          if (b === 'Normal' && a !== 'Normal') return 1;
+
+          return a.localeCompare(
+            b,
+            'pt-BR',
+            { sensitivity: 'base' }
+          );
+        });
+
+        select.innerHTML = temas.map(tema =>
+          `<option value="${escapeHtml(tema)}">${escapeHtml(tema)}</option>`
+        ).join('');
+
+        if (temas.includes(valorAtual)) {
+          select.value = valorAtual;
+        } else if (temas.includes('Normal')) {
+          select.value = 'Normal';
+        }
+      } catch (error) {
+        console.error('Erro ao carregar temas:', error);
+      }
+    }
+
+    function temaAtualFormulario() {
+      if (tipoAtual === 'templates_letras') {
+        return document.getElementById('temaNovo').value.trim() || 'Normal';
+      }
+
+      return document.getElementById('temaExistente').value || 'Normal';
+    }
+
+    function definirTemaFormulario(valor) {
+      const tema = valor || 'Normal';
+
+      if (tipoAtual === 'templates_letras') {
+        document.getElementById('temaNovo').value = tema;
+      } else {
+        document.getElementById('temaExistente').value = tema;
+      }
+    }
+
     async function carregarLista() {
       const lista = document.getElementById('lista');
       const contador = document.getElementById('contadorLista');
@@ -396,6 +610,7 @@
 
         itensCarregados = Array.isArray(data) ? data : [];
 
+        await carregarResumoTemas();
         atualizarFiltros();
         aplicarFiltros();
       } catch (e) {
@@ -420,8 +635,9 @@
       document.getElementById('categoria').value = unescapeAttr(categoriaAtual);
       document.getElementById('grupoVariacao').value =
         grupoVariacaoAtual || '';
-      document.getElementById('tema').value =
-        unescapeAttr(temaAtual) || 'Normal';
+      definirTemaFormulario(
+        unescapeAttr(temaAtual) || 'Normal'
+      );
       document.getElementById('formTitle').innerText = '✏️ Editando Item';
       document.getElementById('btnCancelar').style.display = 'block';
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -433,7 +649,8 @@
       document.getElementById('conteudo').value = '';
       document.getElementById('categoria').value = '';
       document.getElementById('grupoVariacao').value = '';
-      document.getElementById('tema').value = 'Normal';
+      document.getElementById('temaNovo').value = 'Normal';
+      document.getElementById('temaExistente').value = 'Normal';
       document.getElementById('formTitle').innerText = 'Adicionar Novo';
       document.getElementById('btnCancelar').style.display = 'none';
     }
@@ -448,8 +665,7 @@
       const grupoVariacao = grupoVariacaoTexto
         ? Number(grupoVariacaoTexto)
         : null;
-      const tema =
-        document.getElementById('tema').value.trim() || 'Normal';
+      const tema = temaAtualFormulario();
       const msg = document.getElementById('msg');
 
       if (!nome || !conteudo) {

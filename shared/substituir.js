@@ -24,32 +24,103 @@ function extrairSpokenBlocks(texto) {
   return { spokenTexto, resto };
 }
 
+function renumerarVersos(texto) {
+  let numero = 0;
+
+  return texto.replace(
+    /\[Verse(?:\s+\d+)?\]/gi,
+    () => `[Verse ${++numero}]`,
+  );
+}
+
 export function montarLetra(partes, template, nome, genero) {
-  const letraPrincipal = substituirIntel(template.letra || template.texto, nome, genero);
-  const { spokenTexto: spokenTemplate, resto: restoTemplate } = extrairSpokenBlocks(letraPrincipal);
+  const letraPrincipal = substituirIntel(
+    template.letra || template.texto,
+    nome,
+    genero
+  ).trim();
 
-  const versos = [];
-  const spokenPartes = [];
-  let numeroVerso = 1;
+  /*
+   * Preserva integralmente a abertura do Template.
+   *
+   * Tudo que estiver antes do primeiro [Verse] continua exatamente
+   * na ordem criada no Admin:
+   *
+   * [Intro]
+   * [Instrumental]
+   * [Spoken]
+   * pausas
+   * etc.
+   *
+   * Período + Clima + Dia entram imediatamente antes do primeiro
+   * Verse fixo do Template.
+   */
+  const primeiroVerse = letraPrincipal.search(
+    /\[Verse(?:\s+\d+)?\]/i
+  );
 
-  partes.forEach(parte => {
-    if (parte && parte.texto && parte.texto.trim()) {
-      const textoSubst = substituirIntel(parte.texto, nome, genero).trim();
-      const { spokenTexto: s, resto: r } = extrairSpokenBlocks(textoSubst);
-      if (s) spokenPartes.push(s);
-      if (r) versos.push(`[Verse ${numeroVerso}]\n${r}`);
-      numeroVerso++;
+  const abertura =
+    primeiroVerse >= 0
+      ? letraPrincipal.slice(0, primeiroVerse).trim()
+      : '';
+
+  const corpoTemplate =
+    primeiroVerse >= 0
+      ? letraPrincipal.slice(primeiroVerse).trim()
+      : letraPrincipal;
+
+  const blocosContextuais = [];
+  const falasContextuais = [];
+
+  partes.forEach((parte) => {
+    if (!parte?.texto?.trim()) return;
+
+    let texto = substituirIntel(
+      parte.texto,
+      nome,
+      genero
+    ).trim();
+
+    /*
+     * Compatibilidade com blocos antigos:
+     * se Período, Clima ou Dia possuir Spoken/Intro Falada,
+     * essa fala continua independente e nunca fica dentro
+     * de um [Verse].
+     */
+    const {
+      spokenTexto,
+      resto,
+    } = extrairSpokenBlocks(texto);
+
+    if (spokenTexto) {
+      falasContextuais.push(spokenTexto);
+    }
+
+    texto = resto.trim();
+
+    /*
+     * Remove somente o marcador Verse inicial.
+     * A numeração final será feita depois.
+     */
+    texto = texto.replace(
+      /^\[Verse(?:\s+\d+)?\]\s*/i,
+      ''
+    ).trim();
+
+    if (texto) {
+      blocosContextuais.push(`[Verse]\n${texto}`);
     }
   });
 
-  if (restoTemplate) {
-    versos.push(restoTemplate);
-  }
+  const letraFinal = [
+    abertura,
+    ...falasContextuais,
+    ...blocosContextuais,
+    corpoTemplate,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
-  const letraFinal = [];
-  if (spokenTemplate) letraFinal.push(spokenTemplate);
-  if (spokenPartes.length) letraFinal.push(...spokenPartes);
-  letraFinal.push(...versos);
-
-  return letraFinal.filter(Boolean).join('\n\n');
+  return renumerarVersos(letraFinal);
 }
+

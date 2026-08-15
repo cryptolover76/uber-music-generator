@@ -94,12 +94,79 @@ export function createTelegramBotService({ api, repository, preparationService, 
   if (!api || !repository || !preparationService) throw new TypeError('Bot dependencies are required');
   const authorized = String(allowedUserId);
   async function send(chatId, message, options) { for (const chunk of splitTelegramText(message)) await api.sendMessage(chatId, chunk, options); }
-  const guided = createGuidedMusicFlow({ api, repository, styleCatalog, prepareWithStyle, weatherService, send });
+  const guided = createGuidedMusicFlow({ api, repository, styleCatalog, prepareWithStyle, weatherService, send, clock });
   async function sendPreformatted(chatId, value) {
     for (const chunk of splitPreformattedText(value)) await api.sendMessage(chatId, "<pre>" + escapeHtml(chunk) + "</pre>", { parse_mode: "HTML" });
   }
   async function deliver(chatId, request) {
-    await api.sendMessage(chatId, "Pedido confirmado\nTítulo: " + request.title + "\nO Suno pode criar o título automaticamente.");
+    let detalhes = '';
+
+    if (typeof styleCatalog?.findById === 'function') {
+      try {
+        const [template, climate, period, weekday] = await Promise.all([
+          request.template_id
+            ? styleCatalog.findById('templates', request.template_id)
+            : null,
+          request.climate_id
+            ? styleCatalog.findById('climates', request.climate_id)
+            : null,
+          request.period_id
+            ? styleCatalog.findById('periods', request.period_id)
+            : null,
+          request.weekday_id
+            ? styleCatalog.findById('weekdays', request.weekday_id)
+            : null,
+        ]);
+
+        const tema =
+          template?.tema
+          || climate?.tema
+          || period?.tema
+          || weekday?.tema
+          || 'Normal';
+
+        const variacao =
+          template?.grupo
+          ?? climate?.grupo
+          ?? period?.grupo
+          ?? weekday?.grupo
+          ?? null;
+
+        const grupo = (item) =>
+          item?.grupo != null
+            ? ` (Variação ${item.grupo})`
+            : '';
+
+        detalhes =
+          `\nTema: ${tema}`
+          + `\nVariação: ${variacao ?? 'Sem variação'}`
+          + (template
+              ? `\n\nTemplate: ${template.name}${grupo(template)}`
+              : '')
+          + (climate
+              ? `\nClima: ${climate.name}${grupo(climate)}`
+              : '')
+          + (period
+              ? `\nPeríodo: ${period.name}${grupo(period)}`
+              : '')
+          + (weekday
+              ? `\nDia: ${weekday.name}${grupo(weekday)}`
+              : '');
+      } catch (error) {
+        console.error(
+          '[Telegram] não foi possível carregar detalhes da seleção',
+          error?.message || error,
+        );
+      }
+    }
+
+    await api.sendMessage(
+      chatId,
+      "Pedido confirmado\nTítulo: "
+        + request.title
+        + detalhes
+        + "\n\nO Suno pode criar o título automaticamente."
+    );
     if (graphemeLength(request.style_prompt) <= 256) {
       await api.sendMessage(chatId, "Ritmo/prompt de estilo\n" + request.style_prompt, { reply_markup: { inline_keyboard: [[{ text: "📋 Copiar estilo", copy_text: { text: request.style_prompt } }]] } });
     } else {

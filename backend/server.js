@@ -77,7 +77,6 @@ app.post('/api/admin/add', async (req, res) => {
     conteudo,
     categoria,
     grupo: grupoVariacaoRaw,
-    tema: temaRaw,
   } = req.body;
 
   if (!tipo || !TIPOS_VALIDOS[tipo]) {
@@ -118,9 +117,6 @@ app.post('/api/admin/add', async (req, res) => {
       conteudo.trim(),
       categoria || null,
       grupoVariacao,
-      TIPOS_VALIDOS[tipo].aceitaTema
-        ? String(temaRaw || 'Normal').trim()
-        : undefined,
     );
     res.json({ success: true, item });
   } catch (error) {
@@ -168,7 +164,6 @@ app.put('/api/admin/update/:tipo/:id', async (req, res) => {
     conteudo,
     categoria,
     grupo: grupoVariacaoRaw,
-    tema: temaRaw,
   } = req.body;
   if (!TIPOS_VALIDOS[tipo]) return res.status(400).json({ error: 'Tipo inválido' });
   if (!nome || !conteudo) return res.status(400).json({ error: 'Nome e conteúdo obrigatórios' });
@@ -204,9 +199,6 @@ app.put('/api/admin/update/:tipo/:id', async (req, res) => {
       conteudo.trim(),
       categoria !== undefined ? categoria : undefined,
       grupoVariacao,
-      TIPOS_VALIDOS[tipo].aceitaTema
-        ? String(temaRaw || 'Normal').trim()
-        : undefined,
     );
     res.json({ success: true, item });
   } catch (error) {
@@ -237,5 +229,7 @@ async function shutdown(signal) {
 }
 process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 process.once('SIGINT', () => { void shutdown('SIGINT'); });
+
+
 
 export default app;

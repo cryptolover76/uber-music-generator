@@ -22,7 +22,7 @@ export const TIPOS_VALIDOS = {
   },
   climas: {
     colunaConteudo: 'texto',
-    categorias: ['Ensolarado', 'Chuvoso', 'Nublado'],
+    categorias: ['Ensolarado', 'Céu limpo', 'Chuvoso', 'Nublado'],
     aceitaGrupoVariacao: true,
     aceitaTema: true,
   },
