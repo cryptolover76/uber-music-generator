@@ -98,6 +98,14 @@ async function insertRequest(repository, row) {
   throw new TypeError('musicRequestRepository.insert(row) is required');
 }
 
+async function recentTemplateIds(repository, options) {
+  if (typeof repository.listRecentTemplateIds !== 'function') {
+    return [];
+  }
+
+  return repository.listRecentTemplateIds(options);
+}
+
 export function createMusicPreparationService({
   catalogRepository,
   musicRequestRepository,
@@ -219,24 +227,30 @@ export function createMusicPreparationService({
           );
         }
 
-        let completeGroups = intersecao(
-          ...requiredSets,
-          grupos(weekdaysDoTema, selectedWeekdayCategory),
-        );
+        let completeGroups;
 
-        if (
-          !completeGroups.length
-          && context.isWeekend
-        ) {
+        if (context.isWeekend) {
+          const exactGroups = intersecao(
+            ...requiredSets,
+            grupos(weekdaysDoTema, selectedWeekdayCategory),
+          );
+
           const weekendGroups = intersecao(
             ...requiredSets,
             grupos(weekdaysDoTema, 'Fim de semana'),
           );
 
-          if (weekendGroups.length) {
-            selectedWeekdayCategory = 'Fim de semana';
-            completeGroups = weekendGroups;
-          }
+          completeGroups = [
+            ...new Set([
+              ...exactGroups,
+              ...weekendGroups,
+            ]),
+          ].sort((a, b) => a - b);
+        } else {
+          completeGroups = intersecao(
+            ...requiredSets,
+            grupos(weekdaysDoTema, selectedWeekdayCategory),
+          );
         }
 
         const usesGroups =
@@ -250,9 +264,53 @@ export function createMusicPreparationService({
         }
 
         if (completeGroups.length) {
+          const rotationTemplates = templatesDoTema.filter(
+            (item) => completeGroups.includes(item.grupo),
+          );
+
+          /*
+           * Rotação sem repetição:
+           *
+           * Com N grupos disponíveis, nenhum dos últimos N-1 grupos
+           * usados neste Tema pode ser escolhido novamente.
+           *
+           * Exemplo com grupos 1..5:
+           * uma família só volta depois que as outras quatro passaram.
+           *
+           * O histórico vem de music_requests, portanto sobrevive
+           * a restart do PM2.
+           */
+          const recentIds = await recentTemplateIds(
+            musicRequestRepository,
+            {
+              userId: input.telegram_user_id,
+              chatId: input.telegram_chat_id,
+              templateIds: rotationTemplates.map((item) => item.id),
+              limit: Math.max(0, completeGroups.length - 1),
+            },
+          );
+
+          const groupByTemplateId = new Map(
+            rotationTemplates.map((item) => [item.id, item.grupo]),
+          );
+
+          const recentGroups = new Set(
+            recentIds
+              .map((id) => groupByTemplateId.get(id))
+              .filter((group) => Number.isInteger(group)),
+          );
+
+          const unusedGroups = completeGroups.filter(
+            (group) => !recentGroups.has(group),
+          );
+
+          const selectableGroups = unusedGroups.length
+            ? unusedGroups
+            : completeGroups;
+
           selectedGroup = detectGroup(
-            templatesDoTema.filter(
-              (item) => completeGroups.includes(item.grupo),
+            rotationTemplates.filter(
+              (item) => selectableGroups.includes(item.grupo),
             ),
             {
               telegramUpdateId: input.telegram_update_id,
@@ -384,31 +442,53 @@ export function createMusicPreparationService({
           await listCatalog(catalogRepository, 'weekday'),
         );
 
-        let weekdayCategory = selectedWeekdayCategory;
-
         if (context.isWeekend) {
-          try {
-            select(catalogSelector, {
-              items: weekdays,
-              telegramUpdateId: input.telegram_update_id,
-              catalogType: 'weekday',
-              category: weekdayCategory,
-            });
-          } catch (error) {
-            if (!(error instanceof CatalogSelectionError)) {
-              throw error;
-            }
+          const categoriasDisponiveis = [
+            selectedWeekdayCategory,
+            'Fim de semana',
+          ].filter((categoria, index, array) =>
+            array.indexOf(categoria) === index
+            && weekdays.some(
+              (item) => item.categoria === categoria,
+            )
+          );
 
-            weekdayCategory = 'Fim de semana';
+          if (!categoriasDisponiveis.length) {
+            throw new CatalogSelectionError(
+              'weekday',
+              selectedWeekdayCategory,
+            );
           }
-        }
 
-        dia = select(catalogSelector, {
-          items: weekdays,
-          telegramUpdateId: input.telegram_update_id,
-          catalogType: 'weekday',
-          category: weekdayCategory,
-        });
+          const categorySeedItems = categoriasDisponiveis.map(
+            (categoria, index) => ({
+              id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+              active: true,
+              categoria,
+              texto: categoria,
+            }),
+          );
+
+          const categoriaEscolhida = select(catalogSelector, {
+            items: categorySeedItems,
+            telegramUpdateId: input.telegram_update_id,
+            catalogType: 'weekday',
+          }).categoria;
+
+          dia = select(catalogSelector, {
+            items: weekdays,
+            telegramUpdateId: input.telegram_update_id,
+            catalogType: 'weekday',
+            category: categoriaEscolhida,
+          });
+        } else {
+          dia = select(catalogSelector, {
+            items: weekdays,
+            telegramUpdateId: input.telegram_update_id,
+            catalogType: 'weekday',
+            category: selectedWeekdayCategory,
+          });
+        }
       }
 
       const partes = [periodo, clima, dia].filter(Boolean);

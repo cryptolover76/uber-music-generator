@@ -384,3 +384,246 @@ test('seleção automática mantém template, clima, período e dia no mesmo gru
   assert.match(dto.lyrics, /Período grupo 2/);
   assert.match(dto.lyrics, /Dia grupo 2/);
 });
+
+test('rotação automática não repete família até usar todos os grupos disponíveis', async () => {
+  const grouped = {
+    templates: [],
+    styles: [
+      {
+        id: ids.style,
+        active: true,
+        name: 'Samba',
+        prompt: 'samba alegre',
+      },
+    ],
+    periods: [],
+    weekdays: [],
+    climates: [],
+  };
+
+  for (let grupo = 1; grupo <= 5; grupo += 1) {
+    const suffix = String(grupo).padStart(2, '0');
+
+    grouped.templates.push({
+      id: `00000000-0000-4000-8000-0000000001${suffix}`,
+      active: true,
+      name: `Template ${grupo}`,
+      letra: `[Chorus]\nFamília ${grupo} para {NOME}.`,
+      tema: 'Normal',
+      grupo,
+    });
+
+    grouped.periods.push({
+      id: `00000000-0000-4000-8000-0000000002${suffix}`,
+      active: true,
+      name: `Noite ${grupo}`,
+      categoria: 'Noite',
+      texto: `Período família ${grupo}.`,
+      tema: 'Normal',
+      grupo,
+    });
+
+    grouped.weekdays.push({
+      id: `00000000-0000-4000-8000-0000000003${suffix}`,
+      active: true,
+      name: `Sábado ${grupo}`,
+      categoria: 'Sábado',
+      texto: `Dia família ${grupo}.`,
+      tema: 'Normal',
+      grupo,
+    });
+  }
+
+  const repository = createFakeMusicRequestRepository();
+
+  const setup = service({
+    catalogs: grouped,
+    musicRequestRepository: repository,
+  });
+
+  const gruposUsados = [];
+
+  for (let index = 0; index < 5; index += 1) {
+    const updateId = String(9007199254742000n + BigInt(index));
+
+    const result = await setup.instance.prepare(
+      input({
+        update_id: updateId,
+        name: `Pessoa ${index + 1}`,
+      }),
+    );
+
+    const template = grouped.templates.find(
+      (item) => item.id === result.request.template_id,
+    );
+
+    gruposUsados.push(template.grupo);
+  }
+
+  assert.equal(gruposUsados.length, 5);
+  assert.equal(new Set(gruposUsados).size, 5);
+
+  const sexto = await setup.instance.prepare(
+    input({
+      update_id: '9007199254742005',
+      name: 'Pessoa 6',
+    }),
+  );
+
+  const templateSexto = grouped.templates.find(
+    (item) => item.id === sexto.request.template_id,
+  );
+
+  assert.ok([1, 2, 3, 4, 5].includes(templateSexto.grupo));
+});
+
+test('sábado alterna entre categoria específica e Fim de semana dentro do mesmo grupo', async () => {
+  const weekendCatalog = {
+    templates: [
+      {
+        id: ids.template,
+        active: true,
+        name: 'Base',
+        letra: '[Chorus]\nOlá, {NOME}!',
+        tema: 'Normal',
+        grupo: 1,
+      },
+    ],
+    styles: [
+      {
+        id: ids.style,
+        active: true,
+        name: 'Samba',
+        prompt: 'samba alegre',
+      },
+    ],
+    periods: [
+      {
+        id: ids.period,
+        active: true,
+        categoria: 'Noite',
+        texto: 'Noite com {NOME}.',
+        tema: 'Normal',
+        grupo: 1,
+      },
+    ],
+    weekdays: [
+      {
+        id: ids.weekday,
+        active: true,
+        categoria: 'Sábado',
+        texto: 'Sábado de {NOME}.',
+        tema: 'Normal',
+        grupo: 1,
+      },
+      {
+        id: ids.weekend,
+        active: true,
+        categoria: 'Fim de semana',
+        texto: 'Fim de semana de {NOME}.',
+        tema: 'Normal',
+        grupo: 1,
+      },
+    ],
+    climates: [],
+  };
+
+  const setup = service({
+    catalogs: weekendCatalog,
+  });
+
+  const usados = new Set();
+
+  for (let index = 0; index < 30; index += 1) {
+    const result = await setup.instance.prepare(
+      input({
+        update_id: String(9007199254750000n + BigInt(index)),
+        name: `Pessoa ${index}`,
+      }),
+    );
+
+    usados.add(result.request.weekday_id);
+  }
+
+  assert.ok(usados.has(ids.weekday));
+  assert.ok(usados.has(ids.weekend));
+});
+
+test('domingo alterna entre categoria específica e Fim de semana dentro do mesmo grupo', async () => {
+  const sundayId = '00000000-0000-4000-8000-000000000099';
+
+  const weekendCatalog = {
+    templates: [
+      {
+        id: ids.template,
+        active: true,
+        name: 'Base',
+        letra: '[Chorus]\nOlá, {NOME}!',
+        tema: 'Normal',
+        grupo: 1,
+      },
+    ],
+    styles: [
+      {
+        id: ids.style,
+        active: true,
+        name: 'Samba',
+        prompt: 'samba alegre',
+      },
+    ],
+    periods: [
+      {
+        id: ids.period,
+        active: true,
+        categoria: 'Noite',
+        texto: 'Noite com {NOME}.',
+        tema: 'Normal',
+        grupo: 1,
+      },
+    ],
+    weekdays: [
+      {
+        id: sundayId,
+        active: true,
+        categoria: 'Domingo',
+        texto: 'Domingo de {NOME}.',
+        tema: 'Normal',
+        grupo: 1,
+      },
+      {
+        id: ids.weekend,
+        active: true,
+        categoria: 'Fim de semana',
+        texto: 'Fim de semana de {NOME}.',
+        tema: 'Normal',
+        grupo: 1,
+      },
+    ],
+    climates: [],
+  };
+
+  const sundayClock = {
+    now: () => new Date('2026-08-10T01:00:00.000Z'),
+  };
+
+  const setup = service({
+    catalogs: weekendCatalog,
+    clock: sundayClock,
+  });
+
+  const usados = new Set();
+
+  for (let index = 0; index < 30; index += 1) {
+    const result = await setup.instance.prepare(
+      input({
+        update_id: String(9007199254760000n + BigInt(index)),
+        name: `Pessoa ${index}`,
+      }),
+    );
+
+    usados.add(result.request.weekday_id);
+  }
+
+  assert.ok(usados.has(sundayId));
+  assert.ok(usados.has(ids.weekend));
+});

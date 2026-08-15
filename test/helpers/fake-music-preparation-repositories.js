@@ -45,6 +45,32 @@ export function createFakeMusicRequestRepository(initialRows = [], options = {})
       const row = rows.find((candidate) => candidate.telegram_update_id === updateId);
       return row ? { ...row } : null;
     },
+    async listRecentTemplateIds({
+      userId,
+      chatId,
+      templateIds,
+      limit = 20,
+    } = {}) {
+      if (!Array.isArray(templateIds) || !templateIds.length || limit <= 0) {
+        return [];
+      }
+
+      const allowed = new Set(templateIds);
+
+      return rows
+        .filter((row) =>
+          row.telegram_user_id === userId
+          && row.telegram_chat_id === chatId
+          && allowed.has(row.template_id)
+        )
+        .slice()
+        .sort((a, b) =>
+          new Date(b.created_at || 0).getTime()
+          - new Date(a.created_at || 0).getTime()
+        )
+        .slice(0, limit)
+        .map((row) => row.template_id);
+    },
     async insert(row) {
       insertAttempts += 1;
       if (options.insertBarrier) await options.insertBarrier.wait();

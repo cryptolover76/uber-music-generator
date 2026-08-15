@@ -83,6 +83,45 @@ export function createSupabaseMusicRequestRepository({ client } = {}) {
       return data[0] ?? null;
     },
 
+    async listRecentTemplateIds({
+      userId,
+      chatId,
+      templateIds,
+      limit = 20,
+    } = {}) {
+      if (!Array.isArray(templateIds) || !templateIds.length || limit <= 0) {
+        return [];
+      }
+
+      const { data, error } = await client
+        .from('music_requests')
+        .select('template_id,created_at')
+        .eq('telegram_user_id', userId)
+        .eq('telegram_chat_id', chatId)
+        .in('template_id', templateIds)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        throw persistenceError(
+          'MUSIC_REQUEST_HISTORY_FAILED',
+          'Music request history lookup failed',
+          error,
+        );
+      }
+
+      if (!Array.isArray(data)) {
+        throw persistenceError(
+          'INVALID_MUSIC_REQUEST_RESULT',
+          'Music request history returned invalid data',
+        );
+      }
+
+      return data
+        .map((row) => row.template_id)
+        .filter(Boolean);
+    },
+
     async insert(input) {
       const row = preparedRow(input);
       const { data, error } = await client.from('music_requests').insert(row).select(SELECT_FIELDS);

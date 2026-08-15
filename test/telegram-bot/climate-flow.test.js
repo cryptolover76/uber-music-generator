@@ -133,7 +133,7 @@ test('trocar clima abre seleção manual sem preparar pedido', async () => {
 
   assert.match(
     ultimo.text,
-    /Como está o tempo agora/u,
+    /Escolha o clima correto/u,
   );
 
   const textos =
